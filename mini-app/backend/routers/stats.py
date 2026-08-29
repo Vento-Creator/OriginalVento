@@ -15,7 +15,7 @@ async def get_user_stats(user: dict = Depends(get_current_user)):
     # Faol jarayonlar (utag timers)
     timers = await pool.fetch(
         """SELECT id, chat_id, message_text, interval_minutes, is_active, last_sent, created_at
-           FROM utag_timers WHERE user_id = $1 AND is_active = 1""",
+           FROM utag_timers WHERE user_id = $1 AND is_active = true""",
         uid
     )
     timers = [dict(r) for r in timers]
