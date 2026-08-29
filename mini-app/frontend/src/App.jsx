@@ -19,8 +19,13 @@ export default function App() {
 
   useEffect(() => {
     usersApi.getMe()
-      .then(r => setUser(r.data))
-      .catch(e => setError(e.response?.data?.detail || 'Xatolik yuz berdi'))
+      .then(r => {
+        if (typeof r.data === 'string' && r.data.includes('<!doctype html>')) {
+          throw new Error("Backend tizimiga ulanib bo'lmadi (API URL xatosi)")
+        }
+        setUser(r.data)
+      })
+      .catch(e => setError(e.response?.data?.detail || e.message || 'Xatolik yuz berdi'))
       .finally(() => setLoading(false))
   }, [])
 
