@@ -1,0 +1,56 @@
+# Backups
+Vento_backup_20260828_1539/
+
+# Environment files and credentials
+.env
+*.env
+.env.production
+.env.local
+.env.development
+
+# Sessions & Database
+sessions/
+data/
+*.session
+*.session-journal
+*.db
+*.db-shm
+*.db-wal
+database_export.sql
+
+# Local configs and credentials
+Vento/config.py
+config.json
+
+# Logs & temp files
+*.log
+*.txt
+*.bak
+_run_err.log
+_run_out.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+venv/
+.venv/
+env/
+
+# Node (Frontend)
+node_modules/
+dist/
+.svelte-kit/
+.next/
+out/
+.npm
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

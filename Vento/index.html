@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>𝐕𝐄𝐍𝐓𝐎 — Rasmiy Telegram Boti</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --tg-theme-blue: #2AABEE;
+            --tg-theme-dark-blue: #229ED9;
+            --tg-theme-light-bg: #F4F4F5;
+            --tg-theme-card-bg: #FFFFFF;
+            --tg-theme-text-primary: #000000;
+            --tg-theme-text-secondary: #707579;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--tg-theme-light-bg);
+            color: var(--tg-theme-text-primary);
+            line-height: 1.6;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--tg-theme-blue), var(--tg-theme-dark-blue));
+            color: white;
+            padding: 60px 20px;
+            text-align: center;
+            border-bottom-left-radius: 24px;
+            border-bottom-right-radius: 24px;
+            box-shadow: 0 4px 20px rgba(42, 171, 238, 0.2);
+        }
+
+        .hero-avatar {
+            width: 100px;
+            height: 100px;
+            background: white;
+            color: var(--tg-theme-blue);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 42px;
+            margin: 0 auto 20px auto;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        }
+
+        .hero-title {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+
+        .hero-subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto 24px auto;
+        }
+
+        .cta-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background-color: white;
+            color: var(--tg-theme-dark-blue);
+            padding: 14px 28px;
+            border-radius: 30px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .cta-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: var(--tg-theme-text-primary);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--tg-theme-card-bg);
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+            transition: border-color 0.2s;
+            border: 1px solid #E6E6E8;
+        }
+
+        .card-icon {
+            font-size: 28px;
+            color: var(--tg-theme-blue);
+            margin-bottom: 14px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .card-desc {
+            font-size: 14px;
+            color: var(--tg-theme-text-secondary);
+        }
+
+        .privacy-box {
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            margin-top: 40px;
+            border: 1px solid #E6E6E8;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px 20px;
+            color: var(--tg-theme-text-secondary);
+            font-size: 14px;
+            border-top: 1px solid #E6E6E8;
+            margin-top: 50px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="hero-avatar">
+            <i class="fa-solid fa-robot"></i>
+        </div>
+        <h1 class="hero-title">𝐕𝐄𝐍𝐓𝐎</h1>
+        <p class="hero-subtitle">Telegram ekotizimi uchun mo'ljallangan universal avtomatizatsiya, scraper va foydali instrumentlar platformasi.</p>
+        <a href="https://t.me/empire_family_bot" target="_blank" class="cta-button">
+            <i class="fa-brands fa-telegram"></i> Telegram'da Ishga Tushirish
+        </a>
+    </header>
+
+    <div class="container">
+        <h2 class="section-title">Asosiy Imkoniyatlar</h2>
+        
+        <div class="grid">
+            <div class="card">
+                <div class="card-icon"><i class="fa-solid fa-bolt"></i></div>
+                <div class="card-title">Avtomatizatsiya Engine</div>
+                <div class="card-desc">Murakkab va takrorlanuvchi jarayonlarni Telegram orqali avtomatik rejimda bajarish va boshqarish.</div>
+            </div>
+
+            <div class="card">
+                <div class="card-icon"><i class="fa-solid fa-database"></i></div>
+                <div class="card-title">Aktiv Scraper va Baza</div>
+                <div class="card-desc">Guruhlar va ochiq manbalardan ma'lumotlarni tahlil qilish hamda tizimli bazaga jamlash funksiyalari.</div>
+            </div>
+
+            <div class="card">
+                <div class="card-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                <div class="card-title">Xavfsiz va Boshqariladigan System</div>
+                <div class="card-desc">Foydalanuvchilar obunasini va ruxsatnomalarini (VIP/Admin) moslashuvchan boshqarish infratuzilmasi.</div>
+            </div>
+        </div>
+
+        <div class="privacy-box">
+            <h3 style="margin-bottom: 10px;">Maxfiylik va Foydalanish Shartlari</h3>
+            <p style="font-size: 14px; color: var(--tg-theme-text-secondary);">
+                <b>𝐕𝐄𝐍𝐓𝐎</b> boti foydalanuvchilarning shaxsiy ma'lumotlarini uchinchi tomonlarga bermaydi. Barcha jarayonlar Telegram platformasining rasmiy API va xavfsizlik qoidalariga (Terms of Service) to'liq mos keladi.
+            </p>
+        </div>
+    </div>
+
+    <footer>
+        <p>© 2026 𝐕𝐄𝐍𝐓𝐎 Bot Platform. Rasmiy Telegram Bot: <b>@empire_family_bot</b></p>
+    </footer>
+
+</body>
+</html>

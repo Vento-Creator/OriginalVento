@@ -1,0 +1,90 @@
+# Sessions
+sessions/
+*.session
+*.session-journal
+
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+database_export.sql
+
+# Data directories
+data/
+data/sessions/
+data/database/
+
+# Config (sensitive data)
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Environment
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Railway
+.railway/
+
+# Railway
+
+.railway/
+
+# Session backups
+*.session.bak
+
+# Logs
+*.log
+*_out.txt
+*_err.log
+
+# Local diagnostic files
+handlers_inventory.txt
+con*.txt
+
+# Local config (REAL secrets - NEVER commit)
+config.py
+
+# Local diagnostic / development-only scripts (not part of the production app)
+_cmp_db.py
+_fix_db.py
+_repair_db.py
+check_*.py
+diag_*.py
+export_db.py
+find_custom_emoji.py
+inspect_payment_api.py
+observer.py
+monitor.py
+read_console.ps1
+read_successful_payment.py
+scratch_inspector.py
+test_*.py
+test_*_out.txt
+db_out.txt
+diag_out.txt
+logger_test*_out.txt
+monitor_out.txt
+observer*_out.txt
+admin_callback_audit.py
+
