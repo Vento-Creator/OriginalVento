@@ -1,0 +1,6 @@
+pyrotgfork==2.2.24
+TgCrypto
+asyncpg
+psutil
+phonenumbers
+python-dotenv
