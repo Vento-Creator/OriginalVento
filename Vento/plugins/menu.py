@@ -141,13 +141,20 @@ async def start_handler(client: Client, message: Message):
             if _has_session(uid) and not await users_row_exists(uid):
                 logger.info("[START_TRACE] STEP6a: Pending approval, showing waiting message")
                 user_states.pop(uid, None)
-                kb = await get_main_keyboard(uid)
+                # Same "check approval" button as the first login flow, so the user
+                # can poll the status without re-logging in.
+                from login_system import LoginConstants
+                kb_inline = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(LoginConstants.BUTTON_CHECK_APPROVAL, callback_data="check_login_approval")]
+                ])
                 await message.reply_text(
                     f"👋 Salom, **{name}**!\n\n"
                     "⏳ **Akkauntingiz hali tasdiqlanmagan.**\n\n"
                     "Admin tasdiqlashini kuting yoki obuna sotib oling.",
-                    reply_markup=kb
+                    reply_markup=kb_inline
                 )
+                kb = await get_main_keyboard(uid)
+                await message.reply_text("🏠 **Bosh menyu**", reply_markup=kb)
                 return
             # User is logged out or not authenticated - show login screen immediately
             # Clear any existing states
