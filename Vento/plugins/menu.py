@@ -133,6 +133,22 @@ async def start_handler(client: Client, message: Message):
         # CRITICAL: If is_active == 0, user is NOT authenticated regardless of disk files
         if not is_db_active:
             logger.info("[START_TRACE] STEP6: User not authenticated, showing login screen")
+            # PENDING APPROVAL GUARD: If the user already completed a Telegram login
+            # (session file exists) but has no users row yet, they are simply waiting
+            # for admin approval. Do NOT throw them back into the phone/code login
+            # loop every time they press /start — just tell them to wait.
+            from database import users_row_exists
+            if _has_session(uid) and not await users_row_exists(uid):
+                logger.info("[START_TRACE] STEP6a: Pending approval, showing waiting message")
+                user_states.pop(uid, None)
+                kb = await get_main_keyboard(uid)
+                await message.reply_text(
+                    f"👋 Salom, **{name}**!\n\n"
+                    "⏳ **Akkauntingiz hali tasdiqlanmagan.**\n\n"
+                    "Admin tasdiqlashini kuting yoki obuna sotib oling.",
+                    reply_markup=kb
+                )
+                return
             # User is logged out or not authenticated - show login screen immediately
             # Clear any existing states
             user_states.pop(uid, None)

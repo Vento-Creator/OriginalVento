@@ -351,6 +351,17 @@ async def get_user_active_status(user_id: int) -> bool:
     data = await _get_cached_user_data(user_id)
     return data["is_active"]
 
+async def users_row_exists(user_id: int) -> bool:
+    """True if a users-table row exists for this user.
+
+    Distinguishes 'logged out' (row exists with is_active=0) from
+    'pending admin approval' (login completed but no users row yet).
+    """
+    async with get_db_connection() as db:
+        async with db.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            return await cursor.fetchone() is not None
+
+
 async def remove_user(user_id):
     _user_status_cache.pop(user_id, None)
     async with get_db_connection() as db:
