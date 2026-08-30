@@ -1,5 +1,6 @@
 FROM python:3.12-slim
 
+# Railway build status check: gcc install step must appear in build log (commit 2026-08-30)
 ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1
 
 WORKDIR /app
