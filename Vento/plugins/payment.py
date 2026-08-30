@@ -175,73 +175,192 @@ async def successful_payment_handler(client: Client, message: Message):
     )
     
     if not is_new:
-        logger.info(f"Duplicate payment received for charge_id {charge_id}. Skipping subscription grant.")
+        logger.info(f"Duplicate payment received for charge_id {charge_id}. Skipping.")
         if await is_payment_granted(charge_id):
             await message.reply_text("✅ To'lovingiz qabul qilingan va obuna allaqachon faollashtirilgan.")
-            return
-            
+        else:
+            await message.reply_text("✅ Bu to'lov allaqachon qayd etilgan. Admin tasdiqlashini kuting.")
+        return
+
+    # SECURITY (Variant B): a payment alone does NOT grant access.
+    # The payment is recorded as 'pending' and an admin must approve it
+    # (or refund it), so strangers cannot buy their way into heavy features.
+    logger.info(f"Payment {charge_id} recorded as PENDING admin approval for user {user_id}.")
+
+    # 1. Tell the user the payment was received and is awaiting approval
+    check_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Tasdiqlashni tekshirish", callback_data="check_login_approval")]
+    ])
+    await message.reply_text(
+        "✅ **To'lovingiz qabul qilindi!**\n\n"
+        "🔒 Xavfsizlik tekshiruvi uchun to'lov admin tasdiqlashidan o'tishi kerak.\n"
+        "Tasdiqlangach sizga xabar yuboramiz.",
+        reply_markup=check_kb
+    )
+
+    # 2. Ask admins to approve (grant subscription) or reject (refund)
+    uname = f"@{message.from_user.username}" if message.from_user.username else "yo'q"
+    admin_kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"payok_{user_id}"),
+            InlineKeyboardButton("❌ Rad etish (refund)", callback_data=f"payno_{user_id}"),
+        ]
+    ])
+    admin_text = (
+        "💰 **Yangi to'lov — tasdiqlash kutilmoqda!**\n\n"
+        f"Foydalanuvchi: {message.from_user.mention} ([`{user_id}`])\n"
+        f"Username: {uname}\n"
+        f"Miqdor: **{sp.total_amount} {sp.currency}**\n"
+        f"Tranzaksiya ID: `{charge_id}`\n\n"
+        "✅ Tasdiqlangach 30 kunlik obuna faollashadi.\n"
+        "❌ Rad etilsa to'lov avtomatik qaytariladi (refund)."
+    )
+
+    for admin_id in [SUPER_ADMIN_ID, SECOND_ADMIN_ID]:
+        if not admin_id:
+            continue
+        try:
+            await client.send_message(admin_id, admin_text, reply_markup=admin_kb)
+        except Exception as e:
+            logger.error(f"Failed to notify admin {admin_id} about pending payment: {e}")
+
+
+def _payment_admin_filter(_, __, query):
+    """Only admins may approve/refund payments."""
+    from config import is_admin
+    return bool(query and query.from_user and is_admin(query.from_user.id))
+
+
+_payment_admin_cb_filter = filters.create(_payment_admin_filter)
+
+
+@Client.on_callback_query(filters.regex(r"^payok_(\d+)$") & _payment_admin_cb_filter)
+async def payment_approve_callback(client: Client, cq: CallbackQuery):
+    """Admin approves a paid subscription -> activate 30 days."""
+    import time as _time
+    from config import can_manage_users
+    from database import get_latest_pending_payment, claim_pending_payment, grant_subscription, get_db_connection
+    from database_adapter import LoginDatabaseAdapter
+
+    admin_id = cq.from_user.id
+    if not await can_manage_users(admin_id):
+        await cq.answer("❌ Sizda foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
+        return
+
+    target_id = int(cq.matches[0].group(1))
+    payment = await get_latest_pending_payment(target_id)
+    if not payment:
+        await cq.answer("❌ Tasdiqlanmagan to'lov topilmadi.", show_alert=True)
+        return
+
+    # Atomic claim: if two admins click simultaneously only the first wins.
+    payment_id = payment["payment_id"]
+    new_expiry = int(_time.time()) + 30 * 86400
+    if not await claim_pending_payment(payment_id, "granted", new_expiry):
+        await cq.answer("❌ Bu to'lov allaqachon ko'rib chiqilgan.", show_alert=True)
+        return
+
     try:
-        # 2. Calculate subscription expiry & Grant/extend subscription by 30 days
-        new_expiry = await grant_subscription(user_id, days=30)
-        
-        # 3. Mark payment as granted in DB
-        await mark_payment_granted(charge_id, new_expiry)
-        
-        # 4. Set user active status to True in database
-        try:
-            await LoginDatabaseAdapter.set_user_active_status(user_id, True)
-        except Exception as e:
-            logger.error(f"Failed to set user active status in adapter: {e}")
-            
-        # 5. Automatically complete login if user was waiting for admin approval
-        try:
-            from login_system.login_handlers import login_service
-            from config import user_states
-            session = await login_service.state_manager.get_session(user_id)
-            if session:
-                await login_service.approve_login(user_id)
-                user_states.pop(user_id, None)
-                logger.info(f"Automatically approved login for user {user_id} on successful payment.")
-        except Exception as e:
-            logger.error(f"Failed to auto-approve login state for user {user_id}: {e}")
-            
-        expiry_str = datetime.fromtimestamp(new_expiry).strftime('%d.%m.%Y %H:%M')
-        
-        # 6. Notify user
-        await message.reply_text(
-            f"🎉 **To'lov muvaffaqiyatli amalga oshirildi!**\n\n"
-            f"Obuna muddati **30 kunga** uzaytirildi.\n"
-            f"Amal qilish muddati: **{expiry_str}** gacha.\n\n"
-            f"Vento botidan foydalanishda davom etishingiz mumkin!"
-        )
-        
-        # Send main menu
-        try:
-            from plugins.menu import get_main_keyboard
-            kb_reply = await get_main_keyboard(user_id)
-            await message.reply_text("🏠 **Bosh menyu**", reply_markup=kb_reply)
-        except Exception as e:
-            logger.error(f"Failed to send main keyboard to user: {e}")
-            
-        # 7. Notify admin(s)
-        admin_notification = (
-            f"💰 **Yangi to'lov qabul qilindi!**\n\n"
-            f"Foydalanuvchi: {message.from_user.mention} ([`{user_id}`])\n"
-            f"Miqdor: **100 Telegram Stars (XTR)**\n"
-            f"Tranzaksiya ID: `{charge_id}`\n"
-            f"Obuna muddati: **{expiry_str}** gacha uzaytirildi."
-        )
-        
-        for admin_id in [SUPER_ADMIN_ID, SECOND_ADMIN_ID]:
-            try:
-                await client.send_message(admin_id, admin_notification)
-            except Exception as e:
-                logger.error(f"Failed to notify admin {admin_id} about payment: {e}")
-                
+        await grant_subscription(target_id, days=30)
     except Exception as e:
-        logger.error(f"Subscription grant processing failed: {e}")
-        await message.reply_text(
-            "❌ To'lov qabul qilindi, lekin obunani faollashtirishda xatolik yuz berdi. "
-            "Iltimos admin bilan bog'laning va tranzaksiya ID sini ko'rsating:\n"
-            f"ID: `{charge_id}`"
+        logger.error(f"Failed to grant subscription after approval for {target_id}: {e}")
+        # Revert the claim so the payment can be processed again
+        try:
+            async with get_db_connection() as db:
+                await db.execute(
+                    "UPDATE payments SET grant_status = 'pending', granted_expiry = 0, granted_at = 0 WHERE payment_id = ?",
+                    (payment_id,)
+                )
+                await db.commit()
+        except Exception as e2:
+            logger.error(f"Failed to revert payment claim {payment_id}: {e2}")
+        await cq.answer("❌ Obunani faollashtirishda xatolik. Qaytadan urinib ko'ring.", show_alert=True)
+        return
+
+    try:
+        await LoginDatabaseAdapter.set_user_active_status(target_id, True)
+    except Exception as e:
+        logger.error(f"Failed to set active status for {target_id}: {e}")
+
+    # Auto-complete the login state if the user was waiting for approval
+    try:
+        from login_system.login_handlers import login_service
+        from config import user_states
+        session = await login_service.state_manager.get_session(target_id)
+        if session:
+            await login_service.approve_login(target_id)
+        user_states.pop(target_id, None)
+        logger.info(f"Payment approval completed login state for user {target_id}.")
+    except Exception as e:
+        logger.error(f"Failed to auto-complete login state for user {target_id}: {e}")
+
+    try:
+        await cq.message.edit_text(
+            f"{cq.message.text}\n\n✅ **Tasdiqlandi!** `{target_id}` uchun 30 kunlik obuna faollashtildi."
         )
+    except Exception:
+        pass
+
+    try:
+        from plugins.menu import get_main_keyboard
+        await client.send_message(
+            target_id,
+            "🎉 **To'lovingiz tasdiqlandi!** Sizga **30 kunlik** obuna berildi.\n\nVento Botga xush kelibsiz!",
+        )
+        kb_reply = await get_main_keyboard(target_id)
+        await client.send_message(target_id, "🏠 **Bosh menyu**", reply_markup=kb_reply)
+    except Exception as e:
+        logger.error(f"Failed to notify user {target_id} about payment approval: {e}")
+
+    await cq.answer("Tasdiqlandi!")
+
+
+@Client.on_callback_query(filters.regex(r"^payno_(\d+)$") & _payment_admin_cb_filter)
+async def payment_reject_callback(client: Client, cq: CallbackQuery):
+    """Admin rejects a paid subscription -> refund the Stars."""
+    from config import can_manage_users
+    from database import get_latest_pending_payment, claim_pending_payment
+
+    admin_id = cq.from_user.id
+    if not await can_manage_users(admin_id):
+        await cq.answer("❌ Sizda foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
+        return
+
+    target_id = int(cq.matches[0].group(1))
+    payment = await get_latest_pending_payment(target_id)
+    if not payment:
+        await cq.answer("❌ Tasdiqlanmagan to'lov topilmadi.", show_alert=True)
+        return
+
+    payment_id = payment["payment_id"]
+    if not await claim_pending_payment(payment_id, "rejected"):
+        await cq.answer("❌ Bu to'lov allaqachon ko'rib chiqilgan.", show_alert=True)
+        return
+
+    # Refund the Stars (best effort)
+    try:
+        await client.refund_star_payment(target_id, payment_id)
+        refund_note = "💰 To'lov foydalanuvchiga qaytarildi (refund)."
+    except Exception as e:
+        logger.error(f"Refund failed for payment {payment_id} user {target_id}: {e}")
+        refund_note = (
+            "⚠️ Refund avtomatik amalga oshmadi.\n"
+            f"Qo'lda qaytarish uchun charge ID: `{payment_id}`\n"
+            f"(User ID: `{target_id}`)"
+        )
+
+    try:
+        await cq.message.edit_text(f"{cq.message.text}\n\n❌ **Rad etildi!**\n{refund_note}")
+    except Exception:
+        pass
+
+    try:
+        await client.send_message(
+            target_id,
+            "❌ Afsuski, to'lovingiz xavfsizlik tekshiruvidan o'tmadi va yulduzlar akkauntingizga qaytarildi.\n\n"
+            "Savollar bo'lsa, admin bilan bog'lanish tugmasidan yozing.",
+        )
+    except Exception:
+        pass
+
+    await cq.answer("Rad etildi!")

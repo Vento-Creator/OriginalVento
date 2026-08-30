@@ -328,6 +328,42 @@ async def mark_payment_granted(payment_id: str, granted_expiry: int) -> None:
         await db.commit()
 
 
+async def get_latest_pending_payment(user_id: int):
+    """Return the most recent pending (unprocessed) payment for a user, or None."""
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT payment_id, user_id, amount, currency, created_at FROM payments "
+            "WHERE user_id = ? AND grant_status = 'pending' ORDER BY created_at DESC LIMIT 1",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "payment_id": row[0], "user_id": row[1], "amount": row[2],
+                    "currency": row[3], "created_at": row[4],
+                }
+            return None
+
+
+async def claim_pending_payment(payment_id: str, new_status: str, granted_expiry: int = 0) -> bool:
+    """Atomically transition a pending payment to 'granted' or 'rejected'.
+
+    Returns True if this caller won the transition; False if the payment was
+    already processed (protects against two admins clicking simultaneously).
+    """
+    if new_status not in ("granted", "rejected"):
+        return False
+    import time
+    async with get_db_connection() as db:
+        cur = await db.execute(
+            "UPDATE payments SET grant_status = ?, granted_expiry = ?, granted_at = ? "
+            "WHERE payment_id = ? AND grant_status = 'pending'",
+            (new_status, granted_expiry, int(time.time()), payment_id)
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
 async def add_or_update_user(user_id, expiry_date, username=None, first_name=None):
     _user_status_cache.pop(user_id, None)
     async with get_db_connection() as db:

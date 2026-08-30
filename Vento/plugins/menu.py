@@ -150,8 +150,9 @@ async def start_handler(client: Client, message: Message):
                 await message.reply_text(
                     f"👋 Salom, **{name}**!\n\n"
                     "⏳ **Akkauntingiz hali tasdiqlanmagan.**\n\n"
-                    "Admin tasdiqlashini kuting yoki obuna sotib oling.",
-                    reply_markup=kb_inline
+                "Admin tasdiqlashini kuting yoki obuna sotib oling "
+                "(to'lov ham xavfsizlik tekshiruvidan o'tadi).",
+                reply_markup=kb_inline
                 )
                 kb = await get_main_keyboard(uid)
                 await message.reply_text("🏠 **Bosh menyu**", reply_markup=kb)
@@ -273,7 +274,8 @@ async def start_handler(client: Client, message: Message):
             await message.reply_text(
                 f"👋 Salom, **{name}**!\n\n"
                 "⏳ **Akkauntingiz hali tasdiqlanmagan.**\n\n"
-                "Admin tasdiqlashini kuting yoki obuna sotib oling.",
+                "Admin tasdiqlashini kuting yoki obuna sotib oling "
+                "(to'lov ham xavfsizlik tekshiruvidan o'tadi).",
                 reply_markup=kb
             )
             return
