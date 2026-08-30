@@ -1439,27 +1439,68 @@ async def admin_add_handler(client: Client, message: Message):
             user_states.pop(uid, None)
             await message.reply_text("❌ Bu bo'lim faqat Owner uchun!")
             return
-    
-    if state != "admin_add_new":
+    else:
         raise ContinuePropagation
-    
+
+    import re as _re
+
     user_states.pop(uid, None)
-    query = message.text.strip().lstrip("@")
-    
+    raw = (message.text or "").strip()
+    lowered = raw.lower()
+
+    # 1-FILTR: Guruh/profil havolalari qabul qilinmaydi
+    link_markers = ("t.me/", "telegram.me/", "telegram.dog/", "http://", "https://", "joinchat", "tg://")
+    if any(m in lowered for m in link_markers) or lowered.startswith("+"):
+        await message.reply_text(
+            "❌ **Havola yuborildi!**\n\n"
+            "Guruh yoki profil havolasi qabul qilinmaydi.\n"
+            "Faqat **user ID** yoki **@username** yuboring:\n"
+            "Masalan: `123456789` yoki `@username`",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
+            ]])
+        )
+        return
+
+    query = raw.lstrip("@").strip()
+
     if query.isdigit():
         target_id = int(query)
-    else:
-        from database import search_users
-        results = await search_users(query)
-        if not results:
+    elif _re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", query):
+        # Telegram orqali tekshirish va odam akkounti ekanligini aniqlash
+        try:
+            resolved = await client.get_users(f"@{query}")
+            if isinstance(resolved, list):
+                resolved = resolved[0]
+        except Exception:
             await message.reply_text(
-                f"❌ `{query}` topilmadi.",
+                f"❌ `@{query}` Telegramda topilmadi yoki bu kanal/guruh.\n"
+                "Faqat odam akkountining ID yoki @username yuboring.",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
-                ]])
+                InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
+            ]])
             )
             return
-        target_id = results[0]
+        if getattr(resolved, "is_bot", False):
+            await message.reply_text(
+                f"❌ `@{query}` — bu **bot** akkounti!\n"
+                "Faqat odam (inson) akkountlarini admin qilish mumkin.",
+                reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
+            ]])
+            )
+            return
+        target_id = resolved.id
+    else:
+        await message.reply_text(
+            "❌ **Noto'g'ri format!**\n\n"
+            "Faqat **user ID** (`123456789`) yoki **@username** yuboring.\n"
+            "Havola (t.me/...) yubormang!",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
+            ]])
+        )
+        return
     
     if is_admin(target_id):
         await message.reply_text(
@@ -1472,11 +1513,23 @@ async def admin_add_handler(client: Client, message: Message):
     
     try:
         tg_user = await client.get_users(target_id)
+        if isinstance(tg_user, list):
+            tg_user = tg_user[0]
         username = tg_user.username
         first_name = tg_user.first_name
-    except:
+    except Exception:
         await message.reply_text(
-            f"❌ Foydalanuvchi topilmadi!",
+            "❌ Foydalanuvchi topilmadi! ID noto'g'ri yoki bu kanal/guruh.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
+            ]])
+        )
+        return
+
+    if getattr(tg_user, "is_bot", False):
+        await message.reply_text(
+            f"❌ `{target_id}` — bu **bot** akkounti!\n"
+            "Faqat odam (inson) akkountlarini admin qilish mumkin.",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
             ]])

@@ -252,7 +252,7 @@ class LoginHandlers:
             user_states[user_id] = "waiting_for_admin_approval"
             logger.info(f"Regular user {user_id} waiting for admin approval.")
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton(LoginConstants.BUTTON_CHECK_APPROVAL, callback_data=LoginConstants.CALLBACK_CHECK_APPROVAL)]
+                [InlineKeyboardButton(LoginConstants.BUTTON_CHECK_APPROVAL, callback_data="check_login_approval")]
             ])
             
             await msg.edit_text(
@@ -337,9 +337,7 @@ class LoginHandlers:
     async def handle_admin_approve(self, client: Client, callback_query: CallbackQuery, target_id: int):
         """Handle admin approval with an atomic pending->completed transition."""
         admin_id = callback_query.from_user.id
-        if not self._is_admin(admin_id):
-            await callback_query.answer("⛔️ Ruxsat yo'q!", show_alert=True)
-            return
+        # Admin check is now handled by the filter, but we still check permission
         if not await can_manage_users(admin_id):
             await callback_query.answer("❌ Sizda foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
             return
@@ -353,9 +351,22 @@ class LoginHandlers:
                     f"❌ So'rov allaqachon {decision['status']} qilindi.",
                     show_alert=True,
                 )
-            else:
-                await callback_query.answer("❌ So'rov allaqachon ko'rib chiqilgan.", show_alert=True)
-            return
+                return
+            # No in-memory session and no recorded decision: the pending session was
+            # lost (e.g. bot restart) while the request was still awaiting approval.
+            # Fall back to a DB-based approval so the admin can still decide.
+            import os
+            session_file = os.path.join(SESSIONS_DIR, f"user_{target_id}.session")
+            if not os.path.exists(session_file):
+                await callback_query.answer(
+                    "❌ Faol sessiya topilmadi. Foydalanuvchi qaytadan login qilishi kerak.",
+                    show_alert=True,
+                )
+                return
+            logger.info(
+                "[LOGIN] No pending in-memory session for %s, using DB-based approval fallback.",
+                target_id,
+            )
 
         import time
         from datetime import datetime
@@ -390,6 +401,10 @@ class LoginHandlers:
 
         try:
             await client.send_message(target_id, self.settings.messages["approved"])
+            # Send main menu after approval
+            from plugins.menu import get_main_keyboard
+            kb_reply = await get_main_keyboard(target_id)
+            await client.send_message(target_id, "🏠 **Bosh menyu**", reply_markup=kb_reply)
         except Exception:
             pass
 
@@ -399,9 +414,7 @@ class LoginHandlers:
     async def handle_admin_reject(self, client: Client, callback_query: CallbackQuery, target_id: int):
         """Handle admin rejection with an atomic pending->failed transition."""
         admin_id = callback_query.from_user.id
-        if not self._is_admin(admin_id):
-            await callback_query.answer("⛔️ Ruxsat yo'q!", show_alert=True)
-            return
+        # Admin check is now handled by the filter, but we still check permission
         if not await can_manage_users(admin_id):
             await callback_query.answer("❌ Sizda foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
             return
@@ -415,9 +428,13 @@ class LoginHandlers:
                     f"❌ So'rov allaqachon {decision['status']} qilindi.",
                     show_alert=True,
                 )
-            else:
-                await callback_query.answer("❌ So'rov allaqachon ko'rib chiqilgan.", show_alert=True)
-            return
+                return
+            # No in-memory session and no recorded decision: the pending session was
+            # lost (e.g. bot restart). Still honor the admin's rejection.
+            logger.info(
+                "[LOGIN] No pending in-memory session for %s, using DB-based rejection fallback.",
+                target_id,
+            )
 
         import time
         from datetime import datetime
@@ -452,12 +469,16 @@ class LoginHandlers:
         """Handle approval status check"""
         user_id = callback_query.from_user.id
         from login_system import LoginState
+        from database_adapter import LoginDatabaseAdapter
         
         session = await self.login_service.state_manager.get_session(user_id)
         
-        if session and session.state == LoginState.COMPLETED:
+        # Check both session state and database is_active status
+        is_db_active = await LoginDatabaseAdapter.get_user_active_status(user_id)
+        
+        if (session and session.state == LoginState.COMPLETED) or is_db_active:
             user_states.pop(user_id, None)
-            logger.info(f"User {user_id} checked approval, confirmed COMPLETED, cleared state.")
+            logger.info(f"User {user_id} checked approval, confirmed COMPLETED/ACTIVE, cleared state.")
             await callback_query.message.edit_text(
                 self.settings.messages["approved"]
             )
@@ -532,9 +553,7 @@ class LoginHandlers:
     async def handle_admin_invoice(self, client: Client, callback_query: CallbackQuery, target_id: int):
         """Handle admin sending invoice to user"""
         admin_id = callback_query.from_user.id
-        if not self._is_admin(admin_id):
-            await callback_query.answer("⛔️ Ruxsat yo'q!", show_alert=True)
-            return
+        # Admin check is now handled by the filter, but we still check permission
         if not await can_manage_users(admin_id):
             await callback_query.answer("❌ Sizda bu amallni bajarish uchun Foydalanuvchilarni boshqarish yo'q!", show_alert=True)
             return
@@ -654,11 +673,15 @@ async def cancel_login_callback(client: Client, callback_query: CallbackQuery):
 
 
 def _admin_filter(_, __, callback_query: CallbackQuery):
-    """Admin callback filter"""
-    user_id = callback_query.from_user.id if callback_query.from_user else None
-    res = callback_query.from_user and is_admin(user_id)
-    logger.info(f"[DIAG] _admin_filter called: callback_data={callback_query.data} user_id={user_id} is_admin={res}")
-    return res
+    """Admin callback filter - only allow admins to access admin functions"""
+    if not callback_query or not callback_query.from_user:
+        return False
+    user_id = callback_query.from_user.id
+    # Dynamic admin check - reads from current ADMIN_IDS list
+    import config
+    is_admin_result = user_id in config.ADMIN_IDS or user_id in config.DEBUG_ADMIN_IDS
+    logger.info(f"[ADMIN_FILTER] callback_data={callback_query.data} user_id={user_id} is_admin={is_admin_result} ADMIN_IDS={config.ADMIN_IDS}")
+    return is_admin_result
 
 
 _admin_callback_filter = filters.create(_admin_filter)
@@ -677,11 +700,12 @@ async def admin_approve_callback(client: Client, callback_query: CallbackQuery):
 @handle_errors("login", "user_id", auto_retry=False)
 async def admin_reject_callback(client: Client, callback_query: CallbackQuery):
     """Handle admin rejection"""
+    logger.info(f"[DIAG] admin_reject_callback entered: callback_data={callback_query.data}")
     target_id = int(callback_query.matches[0].group(1))
     await login_handlers.handle_admin_reject(client, callback_query, target_id)
 
 
-@Client.on_callback_query(filters.regex("^check_admin_approval$"))
+@Client.on_callback_query(filters.regex("^check_login_approval$"))
 @handle_errors("login", "user_id", auto_retry=False)
 async def check_approval_callback(client: Client, callback_query: CallbackQuery):
     """Handle approval status check"""
@@ -692,6 +716,7 @@ async def check_approval_callback(client: Client, callback_query: CallbackQuery)
 @handle_errors("login", "user_id", auto_retry=False)
 async def admin_invoice_callback(client: Client, callback_query: CallbackQuery):
     """Handle admin sending invoice"""
+    logger.info(f"[DIAG] admin_invoice_callback entered: callback_data={callback_query.data}")
     target_id = int(callback_query.matches[0].group(1))
     await login_handlers.handle_admin_invoice(client, callback_query, target_id)
 

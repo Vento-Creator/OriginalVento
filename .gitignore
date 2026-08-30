@@ -1,5 +1,5 @@
 # Backups
-Vento_backup_20260828_1539/
+Vento_backup_*/
 
 # Environment files and credentials
 .env
@@ -13,6 +13,9 @@ sessions/
 data/
 *.session
 *.session-journal
+*.session-shm
+*.session-wal
+*.session.bak
 *.db
 *.db-shm
 *.db-wal
@@ -27,6 +30,17 @@ config.json
 *.bak
 *_out.txt
 _run_err.log
+
+# Local diagnostic / development-only scripts
+_dbg.py
+_gen_*.py
+_write_*.py
+_test_*.py
+_p1.txt
+_p2.txt
+_p3.txt
+con*.txt
+migrate_*.py.tmp
 
 # Python
 __pycache__/

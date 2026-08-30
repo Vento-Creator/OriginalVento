@@ -19,7 +19,7 @@ VALID_CALLBACK_PATTERNS = [
     "approve_", "reject_", "user_", "stop_utag_", "contact_", "complaint_",
     "resend_code", "code_help", "close_help",
     "complaints_", "chat_", "group_search", "guide_", "owner_", "broadcast_retry",
-    "bc_", "language", "account_link"
+    "bc_", "language", "account_link", "mem_"
 ]
 
 MAX_BUTTON_ROWS = 10
@@ -34,6 +34,10 @@ def is_valid_callback_data(callback_data: str) -> bool:
     """Check if callback data matches valid patterns"""
     if not callback_data:
         return False
+    
+    # Special case for memory game: mem|number or mem|menu or mem|leaderboard
+    if callback_data.startswith("mem|"):
+        return True
     
     for pattern in VALID_CALLBACK_PATTERNS:
         if callback_data.startswith(pattern):
@@ -77,7 +81,7 @@ def log_suspicious_activity(user_id: int, activity_type: str, details: str = "")
 async def notify_admin(client: Client, user_id: int, activity_type: str, details: str = ""):
     """Send security alert to admins"""
     alert_text = (
-        f"🚨 **XAVFSIZLIK OG'OGHI!**\n\n"
+        f"🚨 **XAVFSIZLIK OGOHLANTIRISHI!**\n\n"
         f"👤 User ID: `{user_id}`\n"
         f"⚠️ Xatti-harakat: {activity_type}\n"
         f"📝 Tafsilotlar: {details}\n\n"

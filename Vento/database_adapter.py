@@ -279,9 +279,17 @@ class UtagDatabaseAdapter:
             
             async with get_db_connection() as db:
                 await db.execute('''
-                    INSERT OR REPLACE INTO utag_timers 
+                    INSERT INTO utag_timers 
                     (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, is_active, last_sent, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)
+                    ON CONFLICT (user_id, chat_id) DO UPDATE SET
+                        message_text = EXCLUDED.message_text,
+                        interval_minutes = EXCLUDED.interval_minutes,
+                        repeat_count = EXCLUDED.repeat_count,
+                        repeat_delay = EXCLUDED.repeat_delay,
+                        is_active = 1,
+                        last_sent = 0,
+                        created_at = EXCLUDED.created_at
                 ''', (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, int(time.time())))
                 await db.commit()
             return True

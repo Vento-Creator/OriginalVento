@@ -308,7 +308,7 @@ async def menu_main_callback(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@Client.on_callback_query(filters.regex("^check_admin_approval$"))
+@Client.on_callback_query(filters.regex("^check_menu_approval$"))
 async def check_approval_callback(client: Client, cq: CallbackQuery):
     uid = cq.from_user.id
     
@@ -326,6 +326,7 @@ async def check_approval_callback(client: Client, cq: CallbackQuery):
             "✅ Tasdiqlandi! **Vento Bot**ga xush kelibsiz 🎉",
             reply_markup=kb
         )
+        await cq.answer("Tasdiqlandi!", show_alert=True)
     else:
         await cq.answer("⏳ Hali tasdiqlanmagan. Kuting...", show_alert=True)
 

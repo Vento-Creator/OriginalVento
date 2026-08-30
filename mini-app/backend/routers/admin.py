@@ -97,7 +97,7 @@ async def pending_users(user: dict = Depends(get_current_user)):
         """SELECT u.user_id, u.username, u.first_name, k.last_seen
            FROM users u
            LEFT JOIN known_users k ON k.user_id = u.user_id
-           WHERE u.is_active = false
+           WHERE u.is_active = 0
            ORDER BY k.last_seen DESC NULLS LAST
            LIMIT 50"""
     )

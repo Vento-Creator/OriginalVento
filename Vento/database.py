@@ -267,9 +267,9 @@ async def grant_subscription(user_id: int, days: int = 30) -> int:
     async with get_db_connection() as db:
         await db.execute(
             "INSERT INTO users (user_id, expiry_date, warned, username, first_name, is_active) "
-            "VALUES (?, ?, 0, NULL, NULL, 1) "
-            "ON CONFLICT(user_id) DO UPDATE SET expiry_date = ?, warned = 0, is_active = 1",
-            (user_id, new_expiry, new_expiry)
+            "VALUES ($1, $2, 0, NULL, NULL, 1) "
+            "ON CONFLICT(user_id) DO UPDATE SET expiry_date = $3, warned = 0, is_active = 1",
+            user_id, new_expiry, new_expiry
         )
         await db.commit()
 
@@ -285,9 +285,10 @@ async def record_payment(payment_id: str, user_id: int, amount: int, currency: s
     import time
     async with get_db_connection() as db:
         cur = await db.execute(
-            "INSERT OR IGNORE INTO payments "
+            "INSERT INTO payments "
             "(payment_id, user_id, amount, currency, invoice_payload, status, grant_status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, 'paid', 'pending', ?)",
+            "VALUES (?, ?, ?, ?, ?, 'paid', 'pending', ?) "
+            "ON CONFLICT (payment_id) DO NOTHING",
             (payment_id, user_id, amount, currency, invoice_payload, int(time.time()))
         )
         await db.commit()
@@ -332,16 +333,16 @@ async def add_or_update_user(user_id, expiry_date, username=None, first_name=Non
     async with get_db_connection() as db:
         await db.execute('''
             INSERT INTO users (user_id, expiry_date, warned, username, first_name, is_active)
-            VALUES (?, ?, 0, ?, ?, 1)
-            ON CONFLICT(user_id) DO UPDATE SET expiry_date = ?, warned = 0, username = ?, first_name = ?, is_active = is_active
-        ''', (user_id, expiry_date, username, first_name, expiry_date, username, first_name))
+            VALUES ($1, $2, 0, $3, $4, 1)
+            ON CONFLICT(user_id) DO UPDATE SET expiry_date = $5, warned = 0, username = $6, first_name = $7, is_active = 1
+        ''', user_id, expiry_date, username, first_name, expiry_date, username, first_name)
         await db.commit()
 
 async def set_user_active_status(user_id: int, is_active: bool) -> bool:
-    """Set user active status (1 = active, 0 = inactive/logged out)"""
+    """Set user active status (1 = active, 0 = inactive/logged out). Column is INTEGER."""
     _user_status_cache.pop(user_id, None)
     async with get_db_connection() as db:
-        await db.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (1 if is_active else 0, user_id))
+        await db.execute("UPDATE users SET is_active = $1 WHERE user_id = $2", 1 if is_active else 0, user_id)
         await db.commit()
         return True
 
@@ -364,23 +365,28 @@ async def get_all_users():
 
 async def mark_user_warned(user_id):
     async with get_db_connection() as db:
-        await db.execute("UPDATE users SET warned = 1 WHERE user_id = ?", (user_id,))
+        await db.execute("UPDATE users SET warned = 1 WHERE user_id = $1", user_id)
         await db.commit()
 
 async def add_scraped_group(group_id, group_title, date_scraped, owner_id=0):
     group_title = (group_title or "Baza").split("\n")[0].strip()[:60]
     async with get_db_connection() as db:
         await db.execute('''
-            INSERT OR REPLACE INTO scraped_groups (group_id, group_title, date_scraped, owner_id)
+            INSERT INTO scraped_groups (group_id, group_title, date_scraped, owner_id)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT (group_id) DO UPDATE SET
+                group_title = EXCLUDED.group_title,
+                date_scraped = EXCLUDED.date_scraped,
+                owner_id = EXCLUDED.owner_id
         ''', (group_id, group_title, date_scraped, owner_id))
         await db.commit()
 
 async def add_scraped_member(user_id, username, first_name, group_id):
     async with get_db_connection() as db:
         await db.execute('''
-            INSERT OR IGNORE INTO scraped_members (user_id, username, first_name, group_id)
+            INSERT INTO scraped_members (user_id, username, first_name, group_id)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT (user_id, group_id) DO NOTHING
         ''', (user_id, username, first_name, group_id))
         await db.commit()
 
@@ -388,8 +394,9 @@ async def add_scraped_members_batch(members_batch):
     """Adds a batch of scraped members to the database in a single transaction."""
     async with get_db_connection() as db:
         await db.executemany('''
-            INSERT OR IGNORE INTO scraped_members (user_id, username, first_name, group_id)
+            INSERT INTO scraped_members (user_id, username, first_name, group_id)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT (user_id, group_id) DO NOTHING
         ''', members_batch)
         await db.commit()
 
@@ -428,10 +435,10 @@ async def search_groups(query: str, limit: int = 20):
         async with db.execute(
             """SELECT group_id, group_title, date_scraped, owner_id 
                FROM scraped_groups 
-               WHERE group_title LIKE ? COLLATE NOCASE
+               WHERE group_title ILIKE $1
                ORDER BY date_scraped DESC 
-               LIMIT ?""",
-            (search_pattern, limit)
+               LIMIT $2""",
+            search_pattern, limit
         ) as cursor:
             rows = await cursor.fetchall()
             return [{"group_id": r[0], "group_title": r[1], "date_scraped": r[2], "owner_id": r[3]} for r in rows]
@@ -532,7 +539,7 @@ async def add_manual_members(group_id, members):
     async with get_db_connection() as db:
         for m in members:
             await db.execute(
-                "INSERT OR IGNORE INTO scraped_members (user_id, username, first_name, group_id) VALUES (?, ?, ?, ?)",
+                "INSERT INTO scraped_members (user_id, username, first_name, group_id) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, group_id) DO NOTHING",
                 (m.get("user_id"), m.get("username"), m.get("first_name", ""), group_id)
             )
         await db.commit()
@@ -581,7 +588,7 @@ async def clean_users_without_username():
 async def add_free_user(user_id: int):
     _user_status_cache.pop(user_id, None)
     async with get_db_connection() as db:
-        await db.execute("INSERT OR IGNORE INTO free_users (user_id) VALUES (?)", (user_id,))
+        await db.execute("INSERT INTO free_users (user_id) VALUES (?) ON CONFLICT (user_id) DO NOTHING", (user_id,))
         await db.commit()
 
 async def remove_free_user(user_id: int):
@@ -690,15 +697,15 @@ async def search_users(query: str):
                 rows = await cursor.fetchall()
                 return [r[0] for r in rows]
         async with db.execute(
-            "SELECT user_id FROM known_users WHERE username LIKE ? COLLATE NOCASE",
-            (f"%{query}%",)
+            "SELECT user_id FROM known_users WHERE username ILIKE $1",
+            f"%{query}%"
         ) as cursor:
             rows = await cursor.fetchall()
             ids = [r[0] for r in rows]
         if not ids:
             async with db.execute(
-                "SELECT DISTINCT user_id FROM scraped_members WHERE username LIKE ? COLLATE NOCASE LIMIT 20",
-                (f"%{query}%",)
+                "SELECT DISTINCT user_id FROM scraped_members WHERE username ILIKE $1 LIMIT 20",
+                f"%{query}%"
             ) as cursor:
                 rows = await cursor.fetchall()
                 ids = [r[0] for r in rows]
@@ -846,7 +853,7 @@ async def mark_update_read(user_id: int, update_id: int):
     """Yangilanishni o'qilgan deb belgilash"""
     async with get_db_connection() as db:
         await db.execute(
-            "INSERT OR IGNORE INTO read_updates (user_id, update_id) VALUES (?, ?)",
+            "INSERT INTO read_updates (user_id, update_id) VALUES (?, ?) ON CONFLICT (user_id, update_id) DO NOTHING",
             (user_id, update_id)
         )
         await db.commit()
@@ -966,9 +973,17 @@ async def add_admin(admin_id: int, joined_date: int, admin_date: int):
     """Yangi admin qo'shish"""
     async with get_db_connection() as db:
         await db.execute('''
-            INSERT OR REPLACE INTO admins (admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users)
-            VALUES (?, ?, ?, 1, 1, 1, 1, 1)
-        ''', (admin_id, joined_date, admin_date))
+            INSERT INTO admins (admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users)
+            VALUES ($1, $2, $3, TRUE, TRUE, TRUE, TRUE, TRUE)
+            ON CONFLICT (admin_id) DO UPDATE SET
+                joined_date = EXCLUDED.joined_date,
+                admin_date = EXCLUDED.admin_date,
+                can_add_admin = TRUE,
+                can_ban = TRUE,
+                can_clear_db = TRUE,
+                can_broadcast = TRUE,
+                can_manage_users = TRUE
+        ''', admin_id, joined_date, admin_date)
         await db.commit()
 
 async def remove_admin(admin_id: int):
@@ -1050,8 +1065,8 @@ async def create_complaint_table(db=None):
     if db is not None:
         await db.execute('''
             CREATE TABLE IF NOT EXISTS complaints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
                 username TEXT,
                 first_name TEXT,
                 subject TEXT NOT NULL,
@@ -1068,8 +1083,8 @@ async def create_complaint_table(db=None):
         async with get_db_connection() as conn:
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS complaints (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
                     username TEXT,
                     first_name TEXT,
                     subject TEXT NOT NULL,
@@ -1186,7 +1201,7 @@ async def accept_chat_terms(user_id: int):
     now = int(time.time())
     async with get_db_connection() as db:
         await db.execute(
-            "INSERT OR IGNORE INTO chat_terms_accepted (user_id, accepted_at) VALUES (?, ?)",
+            "INSERT INTO chat_terms_accepted (user_id, accepted_at) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING",
             (user_id, now)
         )
         await db.commit()
@@ -1270,7 +1285,8 @@ async def block_user(blocker_id: int, blocked_id: int):
     now = int(time.time())
     async with get_db_connection() as db:
         await db.execute(
-            "INSERT OR REPLACE INTO chat_blocks (blocker_id, blocked_id, timestamp) VALUES (?, ?, ?)",
+            "INSERT INTO chat_blocks (blocker_id, blocked_id, timestamp) VALUES (?, ?, ?) "
+            "ON CONFLICT (blocker_id, blocked_id) DO UPDATE SET timestamp = EXCLUDED.timestamp",
             (blocker_id, blocked_id, now)
         )
         await db.commit()
@@ -1309,7 +1325,8 @@ async def mute_user(muter_id: int, muted_id: int):
     now = int(time.time())
     async with get_db_connection() as db:
         await db.execute(
-            "INSERT OR REPLACE INTO chat_mutes (muter_id, muted_id, timestamp) VALUES (?, ?, ?)",
+            "INSERT INTO chat_mutes (muter_id, muted_id, timestamp) VALUES (?, ?, ?) "
+            "ON CONFLICT (muter_id, muted_id) DO UPDATE SET timestamp = EXCLUDED.timestamp",
             (muter_id, muted_id, now)
         )
         await db.commit()
@@ -1404,8 +1421,16 @@ async def add_utag_timer(user_id: int, chat_id: int, message_text: str, interval
     now = int(time.time())
     async with get_db_connection() as db:
         await db.execute('''
-            INSERT OR REPLACE INTO utag_timers (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, is_active, last_sent, created_at)
+            INSERT INTO utag_timers (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, is_active, last_sent, created_at)
             VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)
+            ON CONFLICT (user_id, chat_id) DO UPDATE SET
+                message_text = EXCLUDED.message_text,
+                interval_minutes = EXCLUDED.interval_minutes,
+                repeat_count = EXCLUDED.repeat_count,
+                repeat_delay = EXCLUDED.repeat_delay,
+                is_active = 1,
+                last_sent = 0,
+                created_at = EXCLUDED.created_at
         ''', (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, now))
         await db.commit()
 
@@ -1529,8 +1554,16 @@ async def save_auto_stopped_task(stop_key: str, user_id: int, group_id: str, res
     now = int(time.time())
     async with get_db_connection() as db:
         await db.execute('''
-            INSERT OR REPLACE INTO massdm_auto_stopped (stop_key, user_id, group_id, resume_after, reason, message_to_copy_id, delay_hours, created_at)
+            INSERT INTO massdm_auto_stopped (stop_key, user_id, group_id, resume_after, reason, message_to_copy_id, delay_hours, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (stop_key) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                group_id = EXCLUDED.group_id,
+                resume_after = EXCLUDED.resume_after,
+                reason = EXCLUDED.reason,
+                message_to_copy_id = EXCLUDED.message_to_copy_id,
+                delay_hours = EXCLUDED.delay_hours,
+                created_at = EXCLUDED.created_at
         ''', (stop_key, user_id, group_id, resume_after, reason, message_to_copy_id, delay_hours, now))
         await db.commit()
 
@@ -1574,8 +1607,11 @@ async def save_user_custom_command(user_id: int, command: str, message: str, cre
     """Save custom command to database"""
     async with get_db_connection() as db:
         await db.execute('''
-            INSERT OR REPLACE INTO utag_custom_commands (user_id, command, message, created_at)
+            INSERT INTO utag_custom_commands (user_id, command, message, created_at)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT (user_id, command) DO UPDATE SET
+                message = EXCLUDED.message,
+                created_at = EXCLUDED.created_at
         ''', (user_id, command, message, created_at))
         await db.commit()
 
