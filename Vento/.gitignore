@@ -66,8 +66,8 @@ Thumbs.db
 handlers_inventory.txt
 con*.txt
 
-# Local config (REAL secrets - NEVER commit)
-config.py
+# Local config moved to env-only: config.py is now committed (no secrets inside).
+# NEVER hardcode API_ID/API_HASH/BOT_TOKEN here — keep them in env vars.
 
 # Local diagnostic / development-only scripts (not part of the production app)
 _cmp_db.py
