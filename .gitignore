@@ -22,7 +22,6 @@ data/
 database_export.sql
 
 # Local configs and credentials
-Vento/config.py
 config.json
 
 # Logs & temp files

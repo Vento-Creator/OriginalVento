@@ -18,6 +18,10 @@ data/database/
 # Config (sensitive data)
 config.json
 
+# NOTE: config.py is now committed — it is env-only (no secrets).
+# NEVER hardcode API_ID/API_HASH/BOT_TOKEN into it; keep them in env vars.
+
+
 # Python
 __pycache__/
 *.py[cod]
