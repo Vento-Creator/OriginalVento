@@ -1016,13 +1016,20 @@ class LoginService:
     async def approve_login(self, user_id: int, admin_id: int = 0, admin_username: str = "") -> bool:
         """Atomically approve a pending login request."""
         import time
-        return await self.state_manager.update_state(
-            user_id,
-            LoginState.COMPLETED,
-            decision_admin_id=admin_id,
-            decision_admin_username=admin_username or None,
-            decision_at=time.time(),
-        )
+        logger.info(f"[APPROVE_LOGIN] Starting: user_id={user_id}, admin_id={admin_id}, admin_username={admin_username}")
+        try:
+            result = await self.state_manager.update_state(
+                user_id,
+                LoginState.COMPLETED,
+                decision_admin_id=admin_id,
+                decision_admin_username=admin_username or None,
+                decision_at=time.time(),
+            )
+            logger.info(f"[APPROVE_LOGIN] update_state returned: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"[APPROVE_LOGIN] Error: {e}", exc_info=True)
+            return False
 
     async def reject_login(self, user_id: int, admin_id: int = 0, admin_username: str = "") -> bool:
         """Atomically reject a pending login request."""

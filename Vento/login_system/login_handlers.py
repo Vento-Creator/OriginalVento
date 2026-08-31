@@ -397,13 +397,18 @@ class LoginHandlers:
     async def handle_admin_approve(self, client: Client, callback_query: CallbackQuery, target_id: int):
         """Handle admin approval with an atomic pending->completed transition."""
         admin_id = callback_query.from_user.id
+        logger.info(f"[ADMIN_APPROVE] Starting approval: admin_id={admin_id}, target_id={target_id}")
+
         # Admin check is now handled by the filter, but we still check permission
         if not await can_manage_users(admin_id):
+            logger.warning(f"[ADMIN_APPROVE] Permission denied for admin_id={admin_id}")
             await callback_query.answer("❌ Sizda foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
             return
 
         admin_username = callback_query.from_user.username or ""
+        logger.info(f"[ADMIN_APPROVE] Calling approve_login: target_id={target_id}, admin_id={admin_id}, admin_username={admin_username}")
         approved = await self.login_service.approve_login(target_id, admin_id, admin_username)
+        logger.info(f"[ADMIN_APPROVE] approve_login returned: {approved}")
         if not approved:
             decision = self.approval_decisions.get(target_id)
             if decision:
@@ -774,8 +779,14 @@ _admin_callback_filter = filters.create(_admin_filter)
 async def admin_approve_callback(client: Client, callback_query: CallbackQuery):
     """Handle admin approval"""
     logger.info(f"[DIAG] admin_approve_callback entered: callback_data={callback_query.data}")
-    target_id = int(callback_query.matches[0].group(1))
-    await login_handlers.handle_admin_approve(client, callback_query, target_id)
+    try:
+        target_id = int(callback_query.matches[0].group(1))
+        logger.info(f"[DIAG] Extracted target_id: {target_id}")
+        await login_handlers.handle_admin_approve(client, callback_query, target_id)
+        logger.info(f"[DIAG] handle_admin_approve completed successfully")
+    except Exception as e:
+        logger.error(f"[DIAG] admin_approve_callback error: {e}", exc_info=True)
+        await callback_query.answer(f"❌ Xatolik: {e}", show_alert=True)
 
 
 @Client.on_callback_query(filters.regex(r"^admin_reject_(\d+)$") & _admin_callback_filter)
