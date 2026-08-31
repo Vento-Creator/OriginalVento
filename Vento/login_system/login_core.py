@@ -167,6 +167,30 @@ class AuthManager:
         self.api_id = api_id
         self.api_hash = api_hash
         self.session_manager = session_manager
+        # Rolling 1-hour window of successful sendCode calls. Telegram silently
+        # throttles code DELIVERY (not the API call itself) when one api_id
+        # requests too many codes: sendCode succeeds, but users never receive
+        # the code. This counter makes that throttle zone visible in logs.
+        self._send_code_timestamps = []
+    
+    def _record_send_code_success(self):
+        """Track sendCode volume and warn when approaching Telegram's silent throttle zone."""
+        import time
+        now = time.time()
+        self._send_code_timestamps = [
+            t for t in self._send_code_timestamps if now - t < 3600
+        ]
+        self._send_code_timestamps.append(now)
+        hourly = len(self._send_code_timestamps)
+        if hourly in (10, 20) or (hourly > 20 and hourly % 10 == 0):
+            logger.warning(
+                "[CODE_THROTTLE_WATCH] %s ta sendCode so'rovi oxirgi 1 soatda yuborildi. "
+                "Agar foydalanuvchilar 'kod kelmadi' deb xabar qilsa, Telegram bu api_id "
+                "uchun kod yetkazishni yashirin cheklashi mumkin (sendCode muvaffaqiyatli, "
+                "lekin kod yetib bormaydi). Yechim: boshqa api_id dan foydalanish yoki "
+                "login tezligini pasaytirish.",
+                hourly,
+            )
     
     @staticmethod
     def _delivery_label(value) -> str:
@@ -255,6 +279,10 @@ class AuthManager:
                     self._mask_phone_number(phone),
                     delivery.__name__ if delivery else "unknown"
                 )
+                try:
+                    self._record_send_code_success()
+                except Exception:
+                    pass
                 return client, sent.phone_code_hash, self._sent_code_metadata(sent)
             except Exception as send_error:
                 logger.error(
