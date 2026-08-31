@@ -185,15 +185,20 @@ class LoginDatabaseAdapter:
     
     @staticmethod
     async def save_user_session(user_id: int, phone: str, session_data: Dict[str, Any]) -> bool:
-        """Save user login session to database"""
+        """Record that a Telegram login session was completed.
+
+        IMPORTANT: this must NOT create/activate a row in the ``users`` table.
+        A user is only activated when an admin approves the request
+        (``handle_admin_approve`` -> ``grant_subscription``). Creating an
+        active (is_active=1) row here would let users bypass the admin
+        approval gate, and it also breaks the ``users_row_exists`` based
+        pending-approval detection used after bot restarts.
+        """
         try:
-            from database import add_or_update_user
-            # Update user record with phone info
-            await add_or_update_user(
-                user_id, 
-                session_data.get("expiry_date", 0),
-                username=session_data.get("username"),
-                first_name=session_data.get("first_name")
+            logger.info(
+                "Login session completed for user %s (phone masked: %s) - awaiting admin approval.",
+                user_id,
+                phone[:6] + "***" if len(phone) > 6 else "***",
             )
             return True
         except Exception as e:

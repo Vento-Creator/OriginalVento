@@ -26,6 +26,18 @@ class LoginHandlers:
         # Track admin decisions to prevent double-processing: {user_id: {...}}
         self.approval_decisions = {}
     
+    def _record_decision(self, target_id: int, decision: dict, max_entries: int = 500):
+        """Record an admin decision and keep the dict bounded (memory safety)."""
+        self.approval_decisions[target_id] = decision
+        if len(self.approval_decisions) > max_entries:
+            # Drop the oldest decisions first
+            oldest = sorted(
+                self.approval_decisions,
+                key=lambda k: self.approval_decisions[k].get("timestamp", 0),
+            )[: len(self.approval_decisions) - max_entries]
+            for key in oldest:
+                self.approval_decisions.pop(key, None)
+    
     def _code_message(self, session) -> str:
         method = session.delivery_method or "Telegram tomonidan tanlangan usul"
         info = f"📬 **Yuborish usuli:** {method}"
@@ -226,17 +238,18 @@ class LoginHandlers:
         from database_adapter import LoginDatabaseAdapter
         
         logger.info(f"User {user_id} logged in successfully, processing database updates.")
-        # Register user in database
+        # Register user in database (known_users table only - does NOT activate)
         await register_known_user(user_id, message.from_user.username, message.from_user.first_name)
-        
-        # CRITICAL: Set is_active = 1 in database on successful login
-        try:
-            await LoginDatabaseAdapter.set_user_active_status(user_id, True)
-        except Exception as e:
-            logger.error(f"CRITICAL: Failed to set user active in DB on login for user {user_id}: {e}")
         
         if self._is_admin(user_id):
             # Admin - auto approve
+            # NOTE: only admins are activated here. Regular users must stay
+            # is_active=0 until an admin approves them (handle_admin_approve),
+            # otherwise they could bypass the approval gate entirely.
+            try:
+                await LoginDatabaseAdapter.set_user_active_status(user_id, True)
+            except Exception as e:
+                logger.error(f"CRITICAL: Failed to set user active in DB on login for user {user_id}: {e}")
             await self.login_service.approve_login(user_id)
             user_states.pop(user_id, None)
             logger.info(f"Admin user {user_id} approved automatically.")
@@ -322,6 +335,39 @@ class LoginHandlers:
                 )
             except Exception as exc:
                 logger.debug("[LOGIN] Could not sync approval message %s/%s: %s", chat_id, message_id, exc)
+    async def _target_user_block(self, client: Client, target_id: int, callback_query: CallbackQuery = None,
+                                 label: str = "Tasdiqlangan foydalanuvchi") -> str:
+        """Collect display info about the user being approved/rejected."""
+        first_name = ""
+        username = ""
+        try:
+            user = await client.get_users(target_id)
+            if isinstance(user, list):
+                user = user[0]
+            first_name = (user.first_name or "").strip()
+            username = f"@{user.username}" if user.username else ""
+        except Exception as exc:
+            logger.debug("[LOGIN] Could not fetch user info for %s: %s", target_id, exc)
+            # Fallback: parse the original notification message text
+            try:
+                import re
+                text = callback_query.message.text if (callback_query and callback_query.message) else ""
+                m = re.search(r"Ism: \*\*(.+?)\*\*", text)
+                if m:
+                    first_name = m.group(1).strip()
+                u = re.search(r"Username: (@?\S+)", text)
+                if u and u.group(1) not in ("yo'q", "yoq"):
+                    username = u.group(1) if u.group(1).startswith("@") else f"@{u.group(1)}"
+            except Exception:
+                pass
+
+        lines = [f"👤 **{label}:**"]
+        if first_name:
+            lines.append(f"Ism: **{first_name}**")
+        if username:
+            lines.append(f"Username: {username}")
+        lines.append(f"ID: `{target_id}`")
+        return "\n".join(lines)
 
     async def handle_cancel_login(self, client: Client, callback_query: CallbackQuery):
         """Handle login cancellation"""
@@ -347,8 +393,10 @@ class LoginHandlers:
         if not approved:
             decision = self.approval_decisions.get(target_id)
             if decision:
+                decider = decision.get("username") or decision.get("admin_id", "noma'lum")
+                status_word = decision.get("status", "ko'rib chiqilgan")
                 await callback_query.answer(
-                    f"❌ So'rov allaqachon {decision['status']} qilindi.",
+                    f"❌ Bu so'rov allaqachon {status_word}. Qaror qabul qilgan: {decider}",
                     show_alert=True,
                 )
                 return
@@ -374,27 +422,27 @@ class LoginHandlers:
         decision_time = int(time.time())
         local_stamp = datetime.fromtimestamp(decision_time, ZoneInfo('Asia/Tashkent')).strftime('%d.%m.%Y %H:%M:%S')
         actor = f"{admin_id}" + (f" (@{admin_username})" if admin_username else "")
+        user_block = await self._target_user_block(client, target_id, callback_query)
         final_text = (
-            "✅ **Allaqachon tasdiqlangan!**\n"
-            f"Tasdiqlangan vaqti: `{local_stamp}`\n"
-            f"Tasdiqlagan: `{actor}`"
+            "✅ **Foydalanuvchi tasdiqlandi!**\n\n"
+            f"{user_block}\n\n"
+            f"Tasdiqlagan admin: `{actor}`\n"
+            f"Tasdiqlangan vaqti: `{local_stamp}`"
         )
-        self.approval_decisions[target_id] = {
+        self._record_decision(target_id, {
             "status": "tasdiqlangan",
             "admin_id": admin_id,
             "username": admin_username,
             "timestamp": decision_time,
-        }
+        })
 
         # Only the winner gets the subscription. A simultaneous second click cannot.
-        from database import add_or_update_user
-        from database_adapter import LoginDatabaseAdapter
-        expiry = int(time.time()) + 30 * 24 * 3600
-        await add_or_update_user(target_id, expiry)
-        try:
-            await LoginDatabaseAdapter.set_user_active_status(target_id, True)
-        except Exception as exc:
-            logger.error("Failed to set active status for %s: %s", target_id, exc)
+        # grant_subscription EXTENDS the subscription (max(current, now) + 30d) instead
+        # of overwriting it, so re-approval never shortens an already-paid subscription.
+        # It also creates the users-table row with is_active = 1 (the real approval
+        # moment) and invalidates the status cache.
+        from database import grant_subscription
+        await grant_subscription(target_id, 30)
 
         user_states.pop(target_id, None)
         await self._edit_approval_messages(client, target_id, final_text, reply_markup=None, callback_query=callback_query)
@@ -424,8 +472,10 @@ class LoginHandlers:
         if not rejected:
             decision = self.approval_decisions.get(target_id)
             if decision:
+                decider = decision.get("username") or decision.get("admin_id", "noma'lum")
+                status_word = decision.get("status", "ko'rib chiqilgan")
                 await callback_query.answer(
-                    f"❌ So'rov allaqachon {decision['status']} qilindi.",
+                    f"❌ Bu so'rov allaqachon {status_word}. Qaror qabul qilgan: {decider}",
                     show_alert=True,
                 )
                 return
@@ -442,17 +492,19 @@ class LoginHandlers:
         decision_time = int(time.time())
         local_stamp = datetime.fromtimestamp(decision_time, ZoneInfo('Asia/Tashkent')).strftime('%d.%m.%Y %H:%M:%S')
         actor = f"{admin_id}" + (f" (@{admin_username})" if admin_username else "")
+        user_block = await self._target_user_block(client, target_id, callback_query, label="Rad etilgan foydalanuvchi")
         final_text = (
-            "❌ **Rad etilgan!**\n"
-            f"Rad etilgan vaqti: `{local_stamp}`\n"
-            f"Rad etgan: `{actor}`"
+            "❌ **Foydalanuvchi rad etildi!**\n\n"
+            f"{user_block}\n\n"
+            f"Rad etgan admin: `{actor}`\n"
+            f"Rad etilgan vaqti: `{local_stamp}`"
         )
-        self.approval_decisions[target_id] = {
+        self._record_decision(target_id, {
             "status": "rad etilgan",
             "admin_id": admin_id,
             "username": admin_username,
             "timestamp": decision_time,
-        }
+        })
 
         user_states.pop(target_id, None)
         await self._edit_approval_messages(client, target_id, final_text, reply_markup=None, callback_query=callback_query)
