@@ -85,7 +85,6 @@ class SafeDatabaseConnection:
     def __init__(self, conn):
         self._conn = conn
         self._tx = None
-        self._write_locked = False
 
     def execute(self, sql, parameters=None):
         async def _run():
@@ -96,13 +95,13 @@ class SafeDatabaseConnection:
                 first_word = words[0].strip("()[]{},;\"'`")
                 is_write = first_word in ["INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER"]
 
-            if is_write and not self._write_locked:
-                await db_write_lock.acquire()
-                self._write_locked = True
-            
             pg_sql, pg_params = translate_query(sql, parameters)
             try:
-                rows = await self._conn.fetch(pg_sql, *pg_params)
+                if is_write:
+                    async with db_write_lock:
+                        rows = await self._conn.fetch(pg_sql, *pg_params)
+                else:
+                    rows = await self._conn.fetch(pg_sql, *pg_params)
                 return MockSQLiteCursor(rows)
             except Exception as e:
                 logger.error(f"PostgreSQL Execute Error: {e} | SQL: {pg_sql} | Params: {pg_params}")
@@ -119,13 +118,13 @@ class SafeDatabaseConnection:
                 first_word = words[0].strip("()[]{},;\"'`")
                 is_write = first_word in ["INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER"]
 
-            if is_write and not self._write_locked:
-                await db_write_lock.acquire()
-                self._write_locked = True
-            
             pg_sql, _ = translate_query(sql, seq_of_parameters[0] if seq_of_parameters else None)
             try:
-                await self._conn.executemany(pg_sql, seq_of_parameters)
+                if is_write:
+                    async with db_write_lock:
+                        await self._conn.executemany(pg_sql, seq_of_parameters)
+                else:
+                    await self._conn.executemany(pg_sql, seq_of_parameters)
                 return MockSQLiteCursor([])
             except Exception as e:
                 logger.error(f"PostgreSQL Executemany Error: {e} | SQL: {pg_sql}")
@@ -135,20 +134,17 @@ class SafeDatabaseConnection:
 
     async def commit(self):
         # asyncpg auto-commits each statement, no explicit commit needed
-        if self._write_locked:
-            db_write_lock.release()
-            self._write_locked = False
+        # Write lock is now managed in execute/executemany with context manager
+        pass
 
     async def rollback(self):
         # asyncpg auto-commits, rollback is a no-op
-        if self._write_locked:
-            db_write_lock.release()
-            self._write_locked = False
+        # Write lock is now managed in execute/executemany with context manager
+        pass
 
     async def close(self):
-        if self._write_locked:
-            db_write_lock.release()
-            self._write_locked = False
+        # Write lock is now managed in execute/executemany with context manager
+        pass
 
     def __getattr__(self, name):
         return getattr(self._conn, name)
@@ -157,9 +153,8 @@ class SafeDatabaseConnection:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self._write_locked:
-            db_write_lock.release()
-            self._write_locked = False
+        # Write lock is now managed in execute/executemany with context manager
+        pass
         return False
 
 db_pool = None
