@@ -278,6 +278,17 @@ class ApiCredentialPool:
     def __len__(self) -> int:
         return len(self._credentials)
 
+    def stats(self) -> list:
+        """Snapshot of per-credential sendCode volume (for admin diagnostics)."""
+        return [
+            {
+                "label": c.label,
+                "api_id": c.api_id,
+                "hourly_sends": c.hourly_count(),
+            }
+            for c in self._credentials
+        ]
+
 
 class AuthManager:
     """Manages authentication operations"""
@@ -398,7 +409,9 @@ class AuthManager:
                     self._user_api_pairs[user_id] = (credential.api_id, credential.api_hash)
                 except Exception:
                     pass
-                return client, sent.phone_code_hash, self._sent_code_metadata(sent)
+                sent_meta = self._sent_code_metadata(sent)
+                sent_meta["api_id"] = credential.api_id
+                return client, sent.phone_code_hash, sent_meta
             except Exception as send_error:
                 logger.error(
                     "Could not send login code to %s: %s",
