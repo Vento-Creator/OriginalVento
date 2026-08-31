@@ -50,18 +50,42 @@ async def logout_callback(client: Client, callback_query: CallbackQuery):
     user_states.pop(user_id, None)
     user_states[user_id] = LoginState.LOGGED_OUT.value
 
-    # 4. CLEAR USERS ROW: Delete user from database to prevent "pending approval" false positive
-    try:
-        from database import delete_user
-        await delete_user(user_id)
-    except Exception as e:
-        logger.warning("Failed to delete user from DB on logout: %s", e)
+    # 4. KEEP USERS ROW (do NOT delete): The users row is intentionally kept with
+    #    is_active = 0 so the admin panel preserves the client's profile and
+    #    subscription history. The old "pending approval" false positive on
+    #    /start is prevented by archiving the session file (step 6), not by
+    #    deleting the row.
 
-    # 5. CLEAR LOGIN STATE MANAGER: Clear any pending login session
+    # 5. CLEAR LOGIN STATE MANAGER: Remove session from in-memory state manager.
+    #    Uses cleanup_session directly because a FAILED transition is invalid when
+    #    the state is COMPLETED (VALID_TRANSITIONS only allows
+    #    COMPLETED -> IDLE/LOGGED_OUT), and cleanup_session unconditionally
+    #    removes the session entry.
     try:
-        await login_service.cancel_login(user_id)
+        await login_service.state_manager.cleanup_session(user_id)
+        login_service.session_manager.cleanup_pending(user_id)
+        logger.info("Logout: Cleaned up login state manager session for user %s", user_id)
     except Exception as e:
         logger.warning("Failed to clear LoginStateManager state: %s", e)
+    
+    # 6. ARCHIVE SESSION FILES - DO NOT DELETE! The session file is moved into
+    #    SESSIONS_DIR/logged_out/ so the owner panel ("Sessiyadan kod olish")
+    #    can later reconnect to the account's 777000 service chat and read the
+    #    Telegram login codes to help the customer log back in on their device.
+    #    Archiving (instead of leaving the file in place) also makes
+    #    _has_session() return False, so /start shows the login screen instead
+    #    of the "pending approval" waiting message.
+    try:
+        from session_manager import archive_user_session
+        if archive_user_session(user_id):
+            logger.info("Logout: Session files archived to logged_out/ for user %s", user_id)
+        else:
+            logger.info("Logout: No active session file to archive for user %s", user_id)
+    except Exception as e:
+        logger.warning("Failed to archive session files on logout: %s", e)
+    # NOTE: The API map entry is intentionally KEPT — the archived
+    # session may have been created with a rotated API pair, and
+    # get_archived_user_client() needs that entry to reconnect successfully.
     
     await callback_query.message.edit_text(
         "👋 Akkaunt botdan uzildi.\n\nQaytadan ulash uchun `/start` yuboring."

@@ -397,6 +397,21 @@ async def remove_user(user_id):
         await db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
         await db.commit()
 
+
+async def delete_user(user_id):
+    """Delete user from the users table (alias for remove_user).
+
+    Used by the login/logout flow (``plugins/login.py`` calls
+    ``from database import delete_user``).  Deletes the row so that the
+    start handler's STEP6a "pending approval" guard no longer fires
+    after an explicit logout.
+    """
+    _user_status_cache.pop(user_id, None)
+    async with get_db_connection() as db:
+        await db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        await db.commit()
+        return True
+
 async def get_all_users():
     async with get_db_connection() as db:
         async with db.execute("SELECT user_id, expiry_date, warned, username, first_name FROM users") as cursor:

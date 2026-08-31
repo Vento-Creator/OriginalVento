@@ -1,7 +1,7 @@
 from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from config import SUPER_ADMIN_ID, user_states
-from session_manager import get_user_client
+from session_manager import get_user_client, get_archived_user_client
 import asyncio
 import re
 
@@ -43,7 +43,8 @@ async def owner_get_code_cb(client: Client, cq: CallbackQuery):
     await cq.message.edit_text(
         "🔑 **Sessiyadan Kod Olish**\n\n"
         "Kod kerak bo'lgan mijozning **Telegram ID** raqamini yuboring.\n\n"
-        "(Bot avtomatik ravishda uning sessiyasiga kirib 777000 dan kelgan kodni olib keladi)",
+        "(Bot avtomatik ravishda uning sessiyasiga kirib 777000 dan kelgan kodni olib keladi.\n"
+        "Aktiv sessiya bo'lmasa, logout qilingan/arxivlangan sessiyadan ham urinib ko'radi)",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Bekor qilish", callback_data="menu_main")]
         ])
@@ -68,13 +69,31 @@ async def owner_state_handler(client: Client, message: Message):
         
         status_msg = await message.reply_text(f"⏳ `{target_id}` foydalanuvchi sessiyasiga ulanish...")
         
+        # 1) Avval aktiv sessiyaga urinamiz
+        user_client = None
+        source = None
         try:
             user_client = await get_user_client(target_id)
-            if not user_client:
-                await status_msg.edit_text("❌ Bu foydalanuvchining aktiv sessiyasi topilmadi!")
-                return  # Successfully processed owner state, stop propagation
-                
-            await status_msg.edit_text(f"⏳ `{target_id}` sessiyasiga ulandi. 777000 xabarlari o'qilmoqda...")
+            source = "aktiv"
+        except Exception:
+            user_client = None
+        
+        # 2) Aktiv sessiya yo'q bo'lsa - logout qilingan (arxivlangan) sessiyadan urinamiz.
+        #    Bu Owner recovery mexanizmi: qurilmasidan chiqib ketgan mijozga Telegram
+        #    tasdiqlash kodini 777000 servis chatidan o'qib yetkazish.
+        if user_client is None:
+            try:
+                user_client = await get_archived_user_client(target_id)
+                source = "arxiv (logout holati)"
+            except Exception:
+                user_client = None
+        
+        if not user_client:
+            await status_msg.edit_text("❌ Bu foydalanuvchining sessiyasi topilmadi (aktiv ham, arxivlangan ham yo'q)!")
+            return  # Successfully processed owner state, stop propagation
+            
+        try:
+            await status_msg.edit_text(f"⏳ `{target_id}` sessiyasiga ulandi ({source}). 777000 xabarlari o'qilmoqda...")
             
             messages = []
             async for m in user_client.get_chat_history(777000, limit=10):
