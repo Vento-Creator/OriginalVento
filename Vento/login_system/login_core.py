@@ -314,8 +314,26 @@ class AuthManager:
     
     @staticmethod
     def _delivery_label(value) -> str:
-        name = getattr(getattr(value, "__class__", None), "__name__", "") or type(value).__name__
-        key = name.lower()
+        """Map a code delivery value to a human-readable Uzbek label.
+
+        PyroTGFork 2.2.24's high-level ``Client.send_code()`` returns an
+        ``enums.SentCodeType`` enum member (whose *class* name is always
+        "SentCodeType", which previously made every lookup fall through).
+        Raw TL objects from other code paths are also supported.
+        """
+        from enum import Enum
+        if value is None:
+            return "Telegram tomonidan tanlangan usul"
+
+        name = ""
+        if isinstance(value, Enum):
+            # e.g. SentCodeType.SETUP_EMAIL_REQUIRED -> "SETUP_EMAIL_REQUIRED"
+            name = (getattr(value, "name", "") or "").lower()
+            name = name.replace("_", "")  # "setup_email_required" -> "setupemailrequired"
+        else:
+            name = getattr(getattr(value, "__class__", None), "__name__", "") or type(value).__name__
+            name = name.lower()
+
         labels = {
             "sentcodetypeapp": "Telegram ilovasi",
             "sentcodetypesms": "SMS",
@@ -325,10 +343,21 @@ class AuthManager:
             "sentcodetypefragmentsms": "Fragment SMS",
             "sentcodetypesmsword": "SMS (so'z)",
             "sentcodetypesmsphrase": "SMS (ibora)",
-            "sentcodetypesetupemailrequired": "email sozlamasi",
+            "sentcodetypesetupemailrequired": "email sozlamasi talab qilinadi",
             "sentcodetypeemailcode": "email",
+            "sentcodetypefirebasesms": "SMS (Firebase)",
+            # Enum-name keys (already normalized: underscores stripped)
+            "app": "Telegram ilovasi",
+            "sms": "SMS",
+            "call": "telefon qo'ng'irog'i",
+            "flashcall": "flash qo'ng'iroq",
+            "missedcall": "missed call",
+            "fragmentsms": "Fragment SMS",
+            "firebasesms": "SMS (Firebase)",
+            "emailcode": "email",
+            "setupemailrequired": "email sozlamasi talab qilinadi",
         }
-        return labels.get(key, name or "Telegram tomonidan tanlangan usul")
+        return labels.get(name, f"noma'lum usul ({name or '?'})")
 
     @classmethod
     def _sent_code_metadata(cls, sent) -> dict:
@@ -396,11 +425,10 @@ class AuthManager:
                     client.send_code(phone),
                     timeout=10.0
                 )
-                delivery = getattr(getattr(sent, "type", None), "__class__", None)
                 logger.info(
                     "Code sent successfully to %s (delivery=%s)",
                     self._mask_phone_number(phone),
-                    delivery.__name__ if delivery else "unknown"
+                    self._delivery_label(getattr(sent, "type", None)),
                 )
                 try:
                     self._record_send_code_success(credential)
