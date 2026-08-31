@@ -55,7 +55,10 @@ class LoginHandlers:
                 "inglizcha \"Telegram\").\n"
                 "➡️ U yerda **6 xonali kodingiz** yozib turadi.\n"
                 "❗️ Bu chat boshqa chatlar orasida ko'rinmasligi mumkin — qidiruvda «Telegram» deb yozing.\n"
-                "❗️ Kod SMS xabarlar bo'limida bo'lmaydi!"
+                "❗️ Kod SMS xabarlar bo'limida bo'lmaydi!\n"
+                "💡 **SIM kartaga ega bo'lmasangiz ham (sotib olingan akkaunt)** — baribir tashvishlanmang! "
+                "Kod shu akkaunt **ochiq bo'lgan istalgan qurilmadagi** Telegram ilovasida ko'rinadi "
+                "(kompyuterdagi Telegram Desktop, planshet yoki boshqa telefon). SMS shart emas."
             )
         elif "sms" in method_lower:
             info += (
@@ -112,9 +115,9 @@ class LoginHandlers:
             success, message_text, client_obj, phone_code_hash = await self.login_service.submit_phone(user_id, phone)
             
             if success:
-                keyboard = self._code_keyboard()
-                
                 current = await self.login_service.state_manager.get_session(user_id)
+                keyboard = self._code_keyboard(current)
+                
                 await msg.edit_text(
                     self._code_message(current),
                     reply_markup=keyboard
@@ -177,13 +180,8 @@ class LoginHandlers:
             elif success:
                 await self._handle_login_success(client, message, user_id, msg)
             else:
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE),
-                        InlineKeyboardButton(LoginConstants.BUTTON_CODE_HELP, callback_data=LoginConstants.CALLBACK_CODE_HELP)
-                    ],
-                    [InlineKeyboardButton(LoginConstants.BUTTON_CANCEL, callback_data=LoginConstants.CALLBACK_CANCEL_LOGIN)]
-                ])
+                current = await self.login_service.state_manager.get_session(user_id)
+                keyboard = self._code_keyboard(current)
                 await msg.edit_text(f"❌ {message_text}\n\nQaytadan kodni kiriting:", reply_markup=keyboard)
         
         except SessionPasswordNeeded as e:
@@ -558,15 +556,26 @@ class LoginHandlers:
         else:
             await callback_query.answer("⏳ Hali tasdiqlanmadi. Admin javobini kuting.", show_alert=True)
     
-    def _code_keyboard(self) -> InlineKeyboardMarkup:
-        """Keyboard shown while waiting for the code, including an explicit
-        'resend as SMS' option (force_sms) for when Telegram delivers the code
-        in-app and the user cannot see it (off phone / no active client)."""
+    def _code_keyboard(self, session=None) -> InlineKeyboardMarkup:
+        """Keyboard shown while waiting for the code.
+
+        The explicit 'resend as SMS' option (force_sms) is only shown when:
+          - The current delivery is NOT already SMS (pointless to re-request SMS)
+          - AND the user's session indicates they CAN receive SMS (has SIM)
+
+        For users who bought accounts (no SIM), we should NOT tempt them to press
+        the SMS button since their code is always inside the Telegram app.
+        """
+        method = (getattr(session, "delivery_method", "") or "").lower()
+        # Show SMS button only if current delivery is NOT SMS
+        # Users without SIM should simply use the regular "Kodni qayta yuborish" button
+        show_sms = "sms" not in method
+
+        first_row = [InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE)]
+        if show_sms:
+            first_row.append(InlineKeyboardButton(LoginConstants.BUTTON_RESEND_SMS, callback_data=LoginConstants.CALLBACK_RESEND_SMS))
         return InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE),
-                InlineKeyboardButton(LoginConstants.BUTTON_RESEND_SMS, callback_data=LoginConstants.CALLBACK_RESEND_SMS),
-            ],
+            first_row,
             [InlineKeyboardButton(LoginConstants.BUTTON_CODE_HELP, callback_data=LoginConstants.CALLBACK_CODE_HELP)],
             [InlineKeyboardButton(LoginConstants.BUTTON_CANCEL, callback_data=LoginConstants.CALLBACK_CANCEL_LOGIN)]
         ])
@@ -592,7 +601,7 @@ class LoginHandlers:
                     await callback_query.answer("✅ SMS kod yuborildi", show_alert=True)
                 else:
                     await callback_query.answer("✅ Kod qayta yuborildi", show_alert=True)
-                keyboard = self._code_keyboard()
+                keyboard = self._code_keyboard(session)
                 await callback_query.message.edit_text(
                     self._code_message(session) + "\n\n" + message,
                     reply_markup=keyboard
@@ -615,7 +624,7 @@ class LoginHandlers:
             return
         
         # Show help message
-        keyboard = self._code_keyboard()
+        keyboard = self._code_keyboard(session)
         
         await callback_query.message.edit_text(
             self.settings.messages["code_not_received"],
@@ -829,7 +838,7 @@ async def close_help_callback(client: Client, callback_query: CallbackQuery):
         await callback_query.answer("❌ Sessiya topilmadi", show_alert=True)
         return
     
-    keyboard = login_handlers._code_keyboard()
+    keyboard = login_handlers._code_keyboard(session)
     
     await callback_query.message.edit_text(
         login_handlers._code_message(session),

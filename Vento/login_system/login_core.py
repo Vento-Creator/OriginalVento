@@ -585,6 +585,14 @@ class AuthManager:
                 )
             meta = self._sent_code_metadata(sent)
             wait = max(0, int(meta.get("server_timeout", 0) or 0))
+            # When force_sms is requested, we issue a fresh auth.SendCode with
+            # current_number=False. This *requests* SMS delivery, but Telegram's
+            # returned SentCodeType may still be App/SMS depending on number state.
+            # For the UI we treat the delivery as SMS so the tugma hides and the user
+            # is told SMS is being sent.
+            if force_sms:
+                meta["delivery_method"] = "SMS (telegramda so'nggi so'rov orqali)"
+                meta["force_sms_requested"] = True
             method = meta.get("delivery_method") or "Telegram tanlagan usul"
             logger.info(
                 "Code resent to %s via %s; next=%s timeout=%ss",
@@ -739,11 +747,16 @@ class LoginService:
         
         # Send code
         try:
-            # Optionally force real SMS delivery (LOGIN_FORCE_SMS=true). Telegram
-            # otherwise prefers in-app delivery for numbers that have any existing
-            # session, and silently swallows codes into stale sessions' 777000 chat.
+            # Do NOT force SMS by default. Let Telegram choose the delivery method.
+            # Many users (especially those who bought accounts) can only receive codes
+            # via the Telegram app, not SMS. They can manually request SMS via the
+            # "SMS orqali yuborish" button if needed.
             import os
-            force_sms = (os.getenv("LOGIN_FORCE_SMS") or "").strip().lower() in ("1", "true", "yes", "on")
+            force_sms = False  # Default to Telegram's preferred delivery method
+            # Override with env var only if explicitly set (for admin use)
+            if (os.getenv("LOGIN_FORCE_SMS") or "").strip().lower() in ("1", "true", "yes", "on"):
+                force_sms = True
+                logger.warning("LOGIN_FORCE_SMS is enabled - forcing SMS delivery for all logins")
             client, phone_code_hash, code_meta = await self.auth_manager.send_code(
                 user_id, phone, force_sms=force_sms
             )
