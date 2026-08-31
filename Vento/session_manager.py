@@ -59,19 +59,38 @@ async def cleanup_idle_clients():
                     except:
                         pass
 
+def _client_fingerprint() -> dict:
+    """Realistic client strings (mirrors login_system.login_core).
+
+    Advertising as a bot/userbot (old "Vento Userbot" strings) makes Telegram
+    more likely to flag the whole network. A normal phone profile is used by
+    default; override with LOGIN_DEVICE_PROFILE (android|ios|windows|ventologin).
+    """
+    import os
+    profile = (os.getenv("LOGIN_DEVICE_PROFILE") or "android").strip().lower()
+    if profile == "ios":
+        return {"device_model": "iPhone 13", "app_version": "11.7.2", "system_version": "iOS 17.5.1"}
+    if profile == "windows":
+        return {"device_model": "Desktop", "app_version": "6.5.0", "system_version": "Windows 11 Pro 24H2"}
+    if profile == "ventologin":
+        return {"device_model": "Vento Client", "app_version": "Vento Userbot v3.0", "system_version": "Windows 11 Pro 24H2"}
+    return {"device_model": "Samsung SM-A136B", "app_version": "11.8.4", "system_version": "Android 14"}
+
+
 def _build_user_client(user_id: int) -> Client:
     """Create a fresh userbot Client object for the given user."""
     session_name = os.path.join(SESSIONS_DIR, f"user_{user_id}")
     api_id, api_hash = _get_session_api_pair(user_id)
+    fp = _client_fingerprint()
     return Client(
         session_name,
         api_id=api_id,
         api_hash=api_hash,
         workdir=BASE_DIR,
         no_updates=True,
-        device_model="Vento Client",
-        app_version="Vento Userbot v3.0",
-        system_version="Windows 11 Pro 24H2"
+        device_model=fp["device_model"],
+        app_version=fp["app_version"],
+        system_version=fp["system_version"]
     )
 
 

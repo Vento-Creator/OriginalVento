@@ -378,6 +378,46 @@ class AuthManager:
             "server_timeout": timeout,
         }
 
+    @staticmethod
+    def _client_fingerprint() -> dict:
+        """Return realistic client strings to avoid Telegram's silent non-delivery.
+
+        Telegram's anti-abuse inspects device_model/app_version/system_version on
+        the connecting client. Strings that advertise a bot/userbot (e.g. "Vento
+        Client", "Vento Userbot v3.0") are a known trigger for sendCode being
+        *accepted* but the code silently never delivered. A realistic phone
+        profile makes the request look like an ordinary Telegram client login.
+
+        Select with env LOGIN_DEVICE_PROFILE: android (default), ios, windows,
+        or "ventologin" to keep the legacy (spoofed) strings.
+        """
+        import os
+        profile = (os.getenv("LOGIN_DEVICE_PROFILE") or "android").strip().lower()
+        if profile == "ios":
+            return {
+                "device_model": "iPhone 13",
+                "app_version": "11.7.2",
+                "system_version": "iOS 17.5.1",
+            }
+        if profile == "windows":
+            return {
+                "device_model": "Desktop",
+                "app_version": "6.5.0",
+                "system_version": "Windows 11 Pro 24H2",
+            }
+        if profile == "ventologin":
+            return {
+                "device_model": "Vento Client",
+                "app_version": "Vento Userbot v3.0",
+                "system_version": "Windows 11 Pro 24H2",
+            }
+        # Realistic Android phone (default)
+        return {
+            "device_model": "Samsung SM-A136B",
+            "app_version": "11.8.4",
+            "system_version": "Android 14",
+        }
+
     async def send_code(self, user_id: int, phone: str, force_sms: bool = False, pair_index: int = None) -> Tuple[Client, str, dict]:
         """
         Send verification code to phone number with hybrid auth fallback
@@ -401,14 +441,15 @@ class AuthManager:
                 credential = self.credential_pool.get(int(pair_index))
             else:
                 credential = self.credential_pool.pick()
+            fp = self._client_fingerprint()
             client = PyroClient(
                 session_name,
                 api_id=credential.api_id,
                 api_hash=credential.api_hash,
                 phone_number=phone,
-                device_model="Vento Client",
-                app_version="Vento Userbot v3.0",
-                system_version="Windows 11 Pro 24H2"
+                device_model=fp.get("device_model", "Vento Client"),
+                app_version=fp.get("app_version", "Vento Userbot v3.0"),
+                system_version=fp.get("system_version", "Windows 11 Pro 24H2")
             )
             await asyncio.wait_for(client.connect(), timeout=10.0)
             
