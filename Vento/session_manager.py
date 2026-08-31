@@ -1,10 +1,28 @@
 import os
+import json
 import asyncio
 import time
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, AuthKeyDuplicated, SessionExpired, SessionRevoked
 from config import API_ID, API_HASH, SESSIONS_DIR, BASE_DIR
 from task_supervisor import schedule_guarded
+
+# Maps user_id -> {"api_id": ..., "api_hash": ...} for sessions created via the
+# login system with a rotated api pair. Sessions without an entry were created
+# with the primary API_ID/API_HASH, which is used as fallback.
+_API_MAP_PATH = os.path.join(SESSIONS_DIR, "session_api_map.json")
+
+
+def _get_session_api_pair(user_id: int) -> tuple:
+    """Return the (api_id, api_hash) pair this user's session was created with."""
+    try:
+        with open(_API_MAP_PATH, "r", encoding="utf-8") as f:
+            entry = json.load(f).get(str(user_id))
+        if entry and entry.get("api_id") and entry.get("api_hash"):
+            return int(entry["api_id"]), str(entry["api_hash"])
+    except Exception:
+        pass
+    return API_ID, API_HASH
 
 _user_clients = {}
 _client_last_used = {}
@@ -44,10 +62,11 @@ async def cleanup_idle_clients():
 def _build_user_client(user_id: int) -> Client:
     """Create a fresh userbot Client object for the given user."""
     session_name = os.path.join(SESSIONS_DIR, f"user_{user_id}")
+    api_id, api_hash = _get_session_api_pair(user_id)
     return Client(
         session_name,
-        api_id=API_ID,
-        api_hash=API_HASH,
+        api_id=api_id,
+        api_hash=api_hash,
         workdir=BASE_DIR,
         no_updates=True,
         device_model="Vento Client",

@@ -47,8 +47,31 @@ class SessionManager:
     def __init__(self, sessions_dir: str):
         self.sessions_dir = sessions_dir
         self.pending_dir = os.path.join(sessions_dir, "pending")
+        # Maps user_id -> {"api_id": ..., "api_hash": ...} so that the final
+        # session can later be loaded with the SAME api_id pair that created
+        # it (Telegram rejects initConnection with a mismatched api_id).
+        self._api_map_path = os.path.join(sessions_dir, "session_api_map.json")
         os.makedirs(self.pending_dir, exist_ok=True)
         os.makedirs(self.sessions_dir, exist_ok=True)
+
+    def record_session_api(self, user_id: int, api_id: int, api_hash: str):
+        """Persist which api_id/api_hash pair created this user's session."""
+        try:
+            import json
+            mapping = {}
+            if os.path.exists(self._api_map_path):
+                try:
+                    with open(self._api_map_path, "r", encoding="utf-8") as f:
+                        mapping = json.load(f)
+                except Exception:
+                    mapping = {}
+            mapping[str(user_id)] = {"api_id": int(api_id), "api_hash": api_hash}
+            tmp = self._api_map_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(mapping, f)
+            os.replace(tmp, self._api_map_path)
+        except Exception as e:
+            logger.warning("Failed to record session api pair for %s: %s", user_id, e)
     
     def get_pending_session_path(self, user_id: int) -> str:
         """Get pending session file path"""
@@ -160,6 +183,102 @@ class PhoneValidator:
         return True, ""
 
 
+class ApiCredential:
+    """One api_id/api_hash pair with per-credential sendCode volume tracking."""
+    __slots__ = ("api_id", "api_hash", "label", "send_times", "last_used")
+
+    def __init__(self, api_id: int, api_hash: str, label: str):
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.label = label
+        self.send_times = []  # timestamps of successful sendCode calls (1h window)
+        self.last_used = -1  # -1 = never picked; pick() assigns monotonic counter values
+
+    def hourly_count(self) -> int:
+        import time
+        now = time.time()
+        self.send_times = [t for t in self.send_times if now - t < 3600]
+        return len(self.send_times)
+
+    def record_send(self):
+        import time
+        # NOTE: last_used is maintained by ApiCredentialPool.pick() with a
+        # monotonic counter; record_send only tracks sendCode volume.
+        self.send_times.append(time.time())
+        count = self.hourly_count()
+        if count in (10, 20) or (count > 20 and count % 10 == 0):
+            logger.warning(
+                "[CODE_THROTTLE_WATCH] api_id=%s (%s): %s ta sendCode oxirgi 1 soatda. "
+                "Agar foydalanuvchilar 'kod kelmadi' desa, Telegram bu api_id uchun kod "
+                "yetkazishni yashirin cheklayotgan bo'lishi mumkin.",
+                self.api_id, self.label, count,
+            )
+
+
+class ApiCredentialPool:
+    """Round-robin pool of api_id/api_hash pairs.
+
+    Telegram silently throttles code DELIVERY when a single api_id requests
+    too many codes (sendCode succeeds, but the code never arrives). Spreading
+    logins across several api_id/api_hash pairs mitigates this.
+
+    Credentials are loaded from env:
+        API_ID / API_HASH          -> primary (required)
+        API_ID_2 / API_HASH_2      -> extra pair 2
+        API_ID_3 / API_HASH_3      -> extra pair 3
+        ... up to API_ID_10 / API_HASH_10
+    """
+
+    MAX_EXTRA = 10
+
+    def __init__(self, primary_api_id: int, primary_api_hash: str):
+        import os
+        import itertools
+        self._clock = itertools.count()  # monotonic tie-breaker, ms-resolution safe
+        self._credentials = []
+        if primary_api_id and primary_api_hash:
+            self._add(int(primary_api_id), primary_api_hash, "primary")
+        for i in range(2, self.MAX_EXTRA + 1):
+            aid = (os.getenv(f"API_ID_{i}") or "").strip()
+            ahash = (os.getenv(f"API_HASH_{i}") or "").strip()
+            if aid.isdigit() and ahash:
+                self._add(int(aid), ahash, f"extra_{i}")
+        if not self._credentials:
+            logger.error("ApiCredentialPool: no valid api_id/api_hash available!")
+        else:
+            logger.info(
+                "ApiCredentialPool: %s ta API kredensiali yuklandi (%s)",
+                len(self._credentials),
+                ", ".join(c.label for c in self._credentials),
+            )
+
+    def _add(self, api_id: int, api_hash: str, label: str):
+        if any(c.api_id == api_id for c in self._credentials):
+            return  # dedupe
+        self._credentials.append(ApiCredential(api_id, api_hash, label))
+
+    def pick(self) -> ApiCredential:
+        """Choose the credential with the least sendCode load in the last hour.
+
+        Ties are broken by least-recently-used, so logins spread evenly
+        across all pairs.
+        """
+        if not self._credentials:
+            raise LoginError("Hech qanday API kredensiali topilmadi (API_ID/API_HASH)")
+        credential = min(
+            self._credentials,
+            key=lambda c: (c.hourly_count(), c.last_used),
+        )
+        # Update last_used here (not only on successful send) so that
+        # consecutive picks rotate evenly even before any send completes.
+        # Monotonic counter: immune to time.time() resolution limits.
+        credential.last_used = next(self._clock)
+        return credential
+
+    def __len__(self) -> int:
+        return len(self._credentials)
+
+
 class AuthManager:
     """Manages authentication operations"""
     
@@ -167,30 +286,20 @@ class AuthManager:
         self.api_id = api_id
         self.api_hash = api_hash
         self.session_manager = session_manager
-        # Rolling 1-hour window of successful sendCode calls. Telegram silently
-        # throttles code DELIVERY (not the API call itself) when one api_id
-        # requests too many codes: sendCode succeeds, but users never receive
-        # the code. This counter makes that throttle zone visible in logs.
-        self._send_code_timestamps = []
-    
-    def _record_send_code_success(self):
-        """Track sendCode volume and warn when approaching Telegram's silent throttle zone."""
-        import time
-        now = time.time()
-        self._send_code_timestamps = [
-            t for t in self._send_code_timestamps if now - t < 3600
-        ]
-        self._send_code_timestamps.append(now)
-        hourly = len(self._send_code_timestamps)
-        if hourly in (10, 20) or (hourly > 20 and hourly % 10 == 0):
-            logger.warning(
-                "[CODE_THROTTLE_WATCH] %s ta sendCode so'rovi oxirgi 1 soatda yuborildi. "
-                "Agar foydalanuvchilar 'kod kelmadi' deb xabar qilsa, Telegram bu api_id "
-                "uchun kod yetkazishni yashirin cheklashi mumkin (sendCode muvaffaqiyatli, "
-                "lekin kod yetib bormaydi). Yechim: boshqa api_id dan foydalanish yoki "
-                "login tezligini pasaytirish.",
-                hourly,
-            )
+        # user_id -> api_id that created their pending session (needed so the
+        # final session is loaded with the matching pair later).
+        self._user_api_pairs = {}
+        # Pool of api_id/api_hash pairs (primary + optional API_ID_2/API_ID_3
+        # from env). Logins are spread across pairs because Telegram silently
+        # throttles code delivery per api_id under high volume.
+        self.credential_pool = ApiCredentialPool(api_id, api_hash)
+
+    def _record_send_code_success(self, credential: ApiCredential):
+        """Track sendCode volume per credential and warn at throttle zones."""
+        try:
+            credential.record_send()
+        except Exception:
+            pass
     
     @staticmethod
     def _delivery_label(value) -> str:
@@ -237,10 +346,13 @@ class AuthManager:
         
         try:
             from pyrogram import Client as PyroClient
+            # Pick the least-loaded api_id/api_hash pair (Telegram silently
+            # throttles code delivery per api_id under high volume).
+            credential = self.credential_pool.pick()
             client = PyroClient(
                 session_name,
-                api_id=self.api_id,
-                api_hash=self.api_hash,
+                api_id=credential.api_id,
+                api_hash=credential.api_hash,
                 phone_number=phone,
                 device_model="Vento Client",
                 app_version="Vento Userbot v3.0",
@@ -280,7 +392,10 @@ class AuthManager:
                     delivery.__name__ if delivery else "unknown"
                 )
                 try:
-                    self._record_send_code_success()
+                    self._record_send_code_success(credential)
+                    # Remember which api pair created this session so the final
+                    # session file is later loaded with the matching pair.
+                    self._user_api_pairs[user_id] = (credential.api_id, credential.api_hash)
                 except Exception:
                     pass
                 return client, sent.phone_code_hash, self._sent_code_metadata(sent)
@@ -410,6 +525,12 @@ class AuthManager:
             # Move session to final directory (overwrites existing session if present)
             if not self.session_manager.move_session_to_final(user_id):
                 raise SessionError("Sessiya faylini ko'chirishda xatolik")
+
+            # Persist which api_id/api_hash pair created this session so that
+            # session_manager can load it with the matching pair later.
+            api_pair = self._user_api_pairs.pop(user_id, None)
+            if api_pair:
+                self.session_manager.record_session_api(user_id, api_pair[0], api_pair[1])
             
             # Verify session file exists
             if not self.session_manager.session_exists(user_id):
