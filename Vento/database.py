@@ -260,8 +260,8 @@ async def grant_subscription(user_id: int, days: int = 30) -> int:
     async with get_db_connection() as db:
         await db.execute(
             "INSERT INTO users (user_id, expiry_date, warned, username, first_name, is_active) "
-            "VALUES ($1, $2, FALSE, NULL, NULL, TRUE) "
-            "ON CONFLICT(user_id) DO UPDATE SET expiry_date = $3, warned = FALSE, is_active = TRUE",
+            "VALUES ($1, $2, 0, NULL, NULL, 1) "
+            "ON CONFLICT(user_id) DO UPDATE SET expiry_date = $3, warned = 0, is_active = 1",
             (user_id, new_expiry, new_expiry)
         )
         await db.commit()
@@ -362,8 +362,8 @@ async def add_or_update_user(user_id, expiry_date, username=None, first_name=Non
     async with get_db_connection() as db:
         await db.execute('''
             INSERT INTO users (user_id, expiry_date, warned, username, first_name, is_active)
-            VALUES ($1, $2, FALSE, $3, $4, TRUE)
-            ON CONFLICT(user_id) DO UPDATE SET expiry_date = $5, warned = FALSE, username = $6, first_name = $7, is_active = TRUE
+            VALUES ($1, $2, 0, $3, $4, 1)
+            ON CONFLICT(user_id) DO UPDATE SET expiry_date = $5, warned = 0, username = $6, first_name = $7, is_active = 1
         ''', user_id, expiry_date, username, first_name, expiry_date, username, first_name)
         await db.commit()
 
@@ -371,7 +371,7 @@ async def set_user_active_status(user_id: int, is_active: bool) -> bool:
     """Set user active status (1 = active, 0 = inactive/logged out). Column is INTEGER."""
     _user_status_cache.pop(user_id, None)
     async with get_db_connection() as db:
-        await db.execute("UPDATE users SET is_active = $1 WHERE user_id = $2", (TRUE if is_active else FALSE, user_id))
+        await db.execute("UPDATE users SET is_active = $1 WHERE user_id = $2", (1 if is_active else 0, user_id))
         await db.commit()
         return True
 
@@ -405,7 +405,7 @@ async def get_all_users():
 
 async def mark_user_warned(user_id):
     async with get_db_connection() as db:
-        await db.execute("UPDATE users SET warned = TRUE WHERE user_id = $1", (user_id,))
+        await db.execute("UPDATE users SET warned = 1 WHERE user_id = $1", (user_id,))
         await db.commit()
 
 async def add_scraped_group(group_id, group_title, date_scraped, owner_id=0):
@@ -1096,7 +1096,7 @@ async def get_admin_info(admin_id: int):
 async def update_admin_permission(admin_id: int, permission: str, value: bool):
     """Admin huquqini o'zgartirish"""
     async with get_db_connection() as db:
-        await db.execute(f"UPDATE admins SET {permission} = ? WHERE admin_id = ?", (TRUE if value else FALSE, admin_id))
+        await db.execute(f"UPDATE admins SET {permission} = ? WHERE admin_id = ?", (1 if value else 0, admin_id))
         await db.commit()
 
 
@@ -1462,13 +1462,13 @@ async def add_utag_timer(user_id: int, chat_id: int, message_text: str, interval
     async with get_db_connection() as db:
         await db.execute('''
             INSERT INTO utag_timers (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, is_active, last_sent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, TRUE, 0, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)
             ON CONFLICT (user_id, chat_id) DO UPDATE SET
                 message_text = EXCLUDED.message_text,
                 interval_minutes = EXCLUDED.interval_minutes,
                 repeat_count = EXCLUDED.repeat_count,
                 repeat_delay = EXCLUDED.repeat_delay,
-                is_active = TRUE,
+                is_active = 1,
                 last_sent = 0,
                 created_at = EXCLUDED.created_at
         ''', (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, now))
@@ -1514,7 +1514,7 @@ async def update_utag_timer_last_sent(timer_id: int, timestamp: int):
 async def set_utag_timer_active(timer_id: int, is_active: bool):
     """Taymer faolligini o'zgartirish"""
     async with get_db_connection() as db:
-        await db.execute("UPDATE utag_timers SET is_active = ? WHERE id = ?", (TRUE if is_active else FALSE, timer_id))
+        await db.execute("UPDATE utag_timers SET is_active = ? WHERE id = ?", (1 if is_active else 0, timer_id))
         await db.commit()
 
 async def delete_utag_timer(user_id: int, chat_id: int):
@@ -1527,7 +1527,7 @@ async def get_all_active_utag_timers():
     """Barcha faol taymerlarni olish (background task uchun)"""
     async with get_db_connection() as db:
         async with db.execute(
-            "SELECT id, user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, last_sent FROM utag_timers WHERE is_active = TRUE"
+            "SELECT id, user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, last_sent FROM utag_timers WHERE is_active = 1"
         ) as cursor:
             rows = await cursor.fetchall()
             return [{
