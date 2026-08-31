@@ -39,8 +39,10 @@ async def api_diag_command(client: Client, message: Message):
         "",
         "Kod yetkazib bo'lmaganda quyidagilarni tekshiring:",
         "• `/apitest +998901234567` — Telegram qaysi usulni tanlaganini ko'rsatadi",
-        "• `/apitest +998901234567 2` — aynan 2-juftlik orqali test (qaysi juftlik 'toksik' qilinganini aniqlash uchun)",
-        "• Agar usul **Telegram ilovasi** bo'lsa va foydalanuvchida ilova bo'lmasa — kod SMS ga o'tishi uchun «🔄 Qayta yuborish» bosing",
+        "• `/apitest +998901234567 sms` — SMS'ni majburan test qiladi (current_number=False)",
+        "• `/apitest +998901234567 2 sms` — 2-juftlik orqali SMS test",
+        "• Agar usul **Telegram ilovasi** bo'lsa va foydalanuvchida ilova bo'lmasa —",
+        "  `LOGIN_FORCE_SMS=true` env o'zgaruvchisini yoqing (barcha loginlar SMS majburiy)",
     ]
     await message.reply_text("\n".join(lines))
 
@@ -68,28 +70,42 @@ async def api_test_command(client: Client, message: Message):
         return
 
     pair_index = None
-    if len(parts) >= 3:
-        if not parts[2].isdigit():
-            await message.reply_text("❌ Juftlik raqami butun son bo'lishi kerak: `/apitest +998901234567 2`")
-            return
-        pool_len = len(login_service.auth_manager.credential_pool)
-        if not 1 <= int(parts[2]) <= pool_len:
+    force_sms = False
+    for tok in parts[2:]:
+        tl = tok.strip().lower()
+        if tl in ("sms", "force", "forcesms", "force_sms"):
+            force_sms = True
+        elif tok.isdigit():
+            pool_len = len(login_service.auth_manager.credential_pool)
+            if not 1 <= int(tok) <= pool_len:
+                await message.reply_text(
+                    f"❌ Juftlik raqami 1..{pool_len} oralig'ida bo'lishi kerak "
+                    f"(hozirda {pool_len} ta juftlik yuklangan — `/apidiag` bilan ko'ring)."
+                )
+                return
+            pair_index = int(tok)
+        else:
             await message.reply_text(
-                f"❌ Juftlik raqami 1..{pool_len} oralig'ida bo'lishi kerak "
-                f"(hozirda {pool_len} ta juftlik yuklangan — `/apidiag` bilan ko'ring)."
+                "❌ Noma'lum parametr. Foydalanish:\n"
+                "`/apitest +998901234567` — eng bo'sh juftlik\n"
+                "`/apitest +998901234567 2` — 2-juftlik\n"
+                "`/apitest +998901234567 sms` — SMS'ni majburan test qilish\n"
+                "`/apitest +998901234567 2 sms` — 2-juftlik + SMS"
             )
             return
-        pair_index = int(parts[2])
 
     msg = await message.reply_text(
         f"🔄 `{phone}` uchun test kod so'rovi yuborilmoqda..."
         + (f" (juftlik #{pair_index})" if pair_index else "")
+        + (" (SMS majburiy)" if force_sms else "")
     )
     auth = login_service.auth_manager
 
     try:
         test_uid = uid  # pending session keyed by admin id; never completed
-        client_obj, phone_code_hash, meta = await auth.send_code(test_uid, phone, pair_index=pair_index)
+        client_obj, phone_code_hash, meta = await auth.send_code(
+            test_uid, phone, force_sms=force_sms, pair_index=pair_index
+        )
 
         delivery = meta.get("delivery_method") or "noma'lum"
         next_delivery = meta.get("next_delivery_method")
@@ -109,17 +125,25 @@ async def api_test_command(client: Client, message: Message):
             pass
 
         warning = ""
-        if "ilovasi" in delivery.lower():
+        if force_sms and "ilovasi" in delivery.lower():
+            warning = (
+                "\n\n⚠️ **Telegram force_sms'ni inobatga olmadi** — hali ham ilovaga yubordi. "
+                "Bu raqamda aktiv/sahifa sessiya bor, Telegram uni afzal ko'ryapti. "
+                "Boshqa juftlik bilan yoki boshqa raqam bilan sinab ko'ring."
+            )
+        elif "ilovasi" in delivery.lower():
             warning = (
                 "\n\n⚠️ Telegram kodni **Telegram ilovasi ichiga** yubordi (SMS emas). "
                 "Agar shu raqamdagi qurilmada Telegram ilovasi ulanmagan bo'lsa — kod hech qayerga "
-                "yetib bormaydi. «Qayta yuborish» bosilsa odatda SMS ga o'tadi."
+                "yetib bormaydi. `SMS majburiy` uchun `/apitest {phone} sms` bosing."
             )
         elif "sms" not in delivery.lower() and "qo'ng'iroq" not in delivery.lower():
             warning = f"\n\n⚠️ Odatdagi usul emas: **{delivery}**"
 
+        sms_note = " (SMS majburiy)" if force_sms else ""
+
         await msg.edit_text(
-            f"✅ **sendCode muvaffaqiyatli** (Telegram so'rovni qabul qildi)\n\n"
+            f"✅ **sendCode muvaffaqiyatli** (Telegram so'rovni qabul qildi){sms_note}\n\n"
             f"📱 Raqam: `{phone}`\n"
             f"🔑 Ishlatilgan api_id: `{api_id}`\n"
             f"📨 Yetkazish usuli: **{delivery}**\n"

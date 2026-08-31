@@ -412,31 +412,42 @@ class AuthManager:
             )
             await asyncio.wait_for(client.connect(), timeout=10.0)
             
-            # PyroTGFork 2.2.24 does not expose ``force_sms`` as a keyword
-            # on Client.send_code().  Passing it there crashes before Telegram
-            # can even receive the request.  Keep the login flow compatible with
-            # that API and let Telegram choose the delivery method.
-            #
-            # If this fork supports force_sms on Client construction, it is safe
-            # to request it there; otherwise we simply use the normal send_code()
-            # path.  This avoids version-specific keyword arguments.
             try:
+                # force_sms: use the raw auth.sendCode path with
+                # CodeSettings(current_number=False). This flag tells Telegram the
+                # number has NO currently-active session on this client, so it MUST
+                # deliver the code via real SMS instead of an in-app notification.
+                # (Without it, Telegram delivers codes for numbers that have any
+                # existing session - e.g. a stale server-side session file - into
+                # that session's 777000 service chat where nobody can see them.)
                 if force_sms:
-                    try:
-                        # Some Pyrogram forks accept force_sms on Client itself.
-                        # The already-created client cannot be reconstructed safely
-                        # here, so don't retry with an unsupported send_code kwarg.
-                        logger.info(
-                            "force_sms requested, but using fork-compatible send_code() "
-                            "because Client.send_code() does not accept force_sms"
-                        )
-                    except Exception:
-                        pass
+                    from pyrogram.raw.functions.auth import SendCode
+                    from pyrogram.raw.types import CodeSettings
 
-                sent = await asyncio.wait_for(
-                    client.send_code(phone),
-                    timeout=10.0
-                )
+                    sent = await asyncio.wait_for(
+                        client.invoke(
+                            SendCode(
+                                phone_number=phone,
+                                api_id=client.api_id,
+                                api_hash=client.api_hash,
+                                settings=CodeSettings(
+                                    allow_flashcall=False,
+                                    current_number=False,
+                                    allow_app_hash=False,
+                                    allow_missed_call=False,
+                                    allow_firebase=False,
+                                    unknown_number=False,
+                                ),
+                            )
+                        ),
+                        timeout=10.0,
+                    )
+                    logger.info("force_sms used raw auth.SendCode with current_number=False")
+                else:
+                    sent = await asyncio.wait_for(
+                        client.send_code(phone),
+                        timeout=10.0
+                    )
                 logger.info(
                     "Code sent successfully to %s (delivery=%s)",
                     self._mask_phone_number(phone),
@@ -451,7 +462,9 @@ class AuthManager:
                     pass
                 sent_meta = self._sent_code_metadata(sent)
                 sent_meta["api_id"] = credential.api_id
+                sent_meta["force_sms"] = force_sms
                 return client, sent.phone_code_hash, sent_meta
+
             except Exception as send_error:
                 logger.error(
                     "Could not send login code to %s: %s",
@@ -655,7 +668,14 @@ class LoginService:
         
         # Send code
         try:
-            client, phone_code_hash, code_meta = await self.auth_manager.send_code(user_id, phone)
+            # Optionally force real SMS delivery (LOGIN_FORCE_SMS=true). Telegram
+            # otherwise prefers in-app delivery for numbers that have any existing
+            # session, and silently swallows codes into stale sessions' 777000 chat.
+            import os
+            force_sms = (os.getenv("LOGIN_FORCE_SMS") or "").strip().lower() in ("1", "true", "yes", "on")
+            client, phone_code_hash, code_meta = await self.auth_manager.send_code(
+                user_id, phone, force_sms=force_sms
+            )
             
             # CRITICAL: IMMEDIATELY set state to WAITING_CODE before responding to user
             # Update both state systems for compatibility
