@@ -49,8 +49,15 @@ async def logout_callback(client: Client, callback_query: CallbackQuery):
     # 3. RESET FSM: Clear all state and set to LOGGED_OUT
     user_states.pop(user_id, None)
     user_states[user_id] = LoginState.LOGGED_OUT.value
-    
-    # Also clear new LoginStateManager state for consistency
+
+    # 4. CLEAR USERS ROW: Delete user from database to prevent "pending approval" false positive
+    try:
+        from database import delete_user
+        await delete_user(user_id)
+    except Exception as e:
+        logger.warning("Failed to delete user from DB on logout: %s", e)
+
+    # 5. CLEAR LOGIN STATE MANAGER: Clear any pending login session
     try:
         await login_service.cancel_login(user_id)
     except Exception as e:
