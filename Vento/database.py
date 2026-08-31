@@ -185,9 +185,7 @@ async def get_db_connection():
     try:
         yield safe_conn
     finally:
-        if safe_conn._write_locked:
-            db_write_lock.release()
-            safe_conn._write_locked = False
+        # Write lock is now managed in execute/executemany with context manager
         await db_pool.release(conn)
 
 async def init_db():
