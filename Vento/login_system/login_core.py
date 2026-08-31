@@ -275,6 +275,14 @@ class ApiCredentialPool:
         credential.last_used = next(self._clock)
         return credential
 
+    def get(self, index: int) -> ApiCredential:
+        """Return credential by 1-based index (order shown in /apidiag)."""
+        if not self._credentials:
+            raise LoginError("Hech qanday API kredensiali topilmadi (API_ID/API_HASH)")
+        if not 1 <= index <= len(self._credentials):
+            raise LoginError(f"API juftlik indeksi 1..{len(self._credentials)} oralig'ida bo'lishi kerak")
+        return self._credentials[index - 1]
+
     def __len__(self) -> int:
         return len(self._credentials)
 
@@ -370,7 +378,7 @@ class AuthManager:
             "server_timeout": timeout,
         }
 
-    async def send_code(self, user_id: int, phone: str, force_sms: bool = False) -> Tuple[Client, str, dict]:
+    async def send_code(self, user_id: int, phone: str, force_sms: bool = False, pair_index: int = None) -> Tuple[Client, str, dict]:
         """
         Send verification code to phone number with hybrid auth fallback
         
@@ -378,6 +386,7 @@ class AuthManager:
             user_id: User ID
             phone: Phone number in E.164 format
             force_sms: Force SMS instead of app notification
+            pair_index: Optional 1-based credential pool index (admin /apitest)
             
         Returns:
             (client, phone_code_hash)
@@ -388,7 +397,10 @@ class AuthManager:
             from pyrogram import Client as PyroClient
             # Pick the least-loaded api_id/api_hash pair (Telegram silently
             # throttles code delivery per api_id under high volume).
-            credential = self.credential_pool.pick()
+            if pair_index is not None:
+                credential = self.credential_pool.get(int(pair_index))
+            else:
+                credential = self.credential_pool.pick()
             client = PyroClient(
                 session_name,
                 api_id=credential.api_id,

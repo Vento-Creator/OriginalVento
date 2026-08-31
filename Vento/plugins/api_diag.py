@@ -30,15 +30,16 @@ async def api_diag_command(client: Client, message: Message):
         "🔧 **API Credential Pool holati**",
         "",
     ]
-    for s in stats:
+    for i, s in enumerate(stats, start=1):
         load_bar = "▓" * min(s["hourly_sends"], 20) or "—"
         lines.append(
-            f"`{s['api_id']}` ({s['label']}): **{s['hourly_sends']}** ta/soat {load_bar}"
+            f"**{i}.** `{s['api_id']}` ({s['label']}): **{s['hourly_sends']}** ta/soat {load_bar}"
         )
     lines += [
         "",
         "Kod yetkazib bo'lmaganda quyidagilarni tekshiring:",
         "• `/apitest +998901234567` — Telegram qaysi usulni tanlaganini ko'rsatadi",
+        "• `/apitest +998901234567 2` — aynan 2-juftlik orqali test (qaysi juftlik 'toksik' qilinganini aniqlash uchun)",
         "• Agar usul **Telegram ilovasi** bo'lsa va foydalanuvchida ilova bo'lmasa — kod SMS ga o'tishi uchun «🔄 Qayta yuborish» bosing",
     ]
     await message.reply_text("\n".join(lines))
@@ -50,10 +51,12 @@ async def api_test_command(client: Client, message: Message):
     if not is_admin(uid):
         return
 
-    parts = (message.text or "").split(maxsplit=1)
+    parts = (message.text or "").split()
     if len(parts) < 2:
         await message.reply_text(
-            "📱 Foydalanish: `/apitest +998901234567`\n\n"
+            "📱 Foydalanish:\n"
+            "`/apitest +998901234567` — eng bo'sh juftlik orqali test\n"
+            "`/apitest +998901234567 2` — aynan 2-juftlik orqali test\n\n"
             "Bu haqiqiy kod so'rovini yuboradi (login tugatilmaydi) va Telegram "
             "tanlagan yetkazish usulini ko'rsatadi."
         )
@@ -64,12 +67,29 @@ async def api_test_command(client: Client, message: Message):
         await message.reply_text("❌ Raqam noto'g'ri formatda. Masalan: `/apitest +998901234567`")
         return
 
-    msg = await message.reply_text(f"🔄 `{phone}` uchun test kod so'rovi yuborilmoqda...")
+    pair_index = None
+    if len(parts) >= 3:
+        if not parts[2].isdigit():
+            await message.reply_text("❌ Juftlik raqami butun son bo'lishi kerak: `/apitest +998901234567 2`")
+            return
+        pool_len = len(login_service.auth_manager.credential_pool)
+        if not 1 <= int(parts[2]) <= pool_len:
+            await message.reply_text(
+                f"❌ Juftlik raqami 1..{pool_len} oralig'ida bo'lishi kerak "
+                f"(hozirda {pool_len} ta juftlik yuklangan — `/apidiag` bilan ko'ring)."
+            )
+            return
+        pair_index = int(parts[2])
+
+    msg = await message.reply_text(
+        f"🔄 `{phone}` uchun test kod so'rovi yuborilmoqda..."
+        + (f" (juftlik #{pair_index})" if pair_index else "")
+    )
     auth = login_service.auth_manager
 
     try:
         test_uid = uid  # pending session keyed by admin id; never completed
-        client_obj, phone_code_hash, meta = await auth.send_code(test_uid, phone)
+        client_obj, phone_code_hash, meta = await auth.send_code(test_uid, phone, pair_index=pair_index)
 
         delivery = meta.get("delivery_method") or "noma'lum"
         next_delivery = meta.get("next_delivery_method")
