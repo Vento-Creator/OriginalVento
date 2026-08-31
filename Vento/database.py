@@ -260,8 +260,8 @@ async def grant_subscription(user_id: int, days: int = 30) -> int:
     async with get_db_connection() as db:
         await db.execute(
             "INSERT INTO users (user_id, expiry_date, warned, username, first_name, is_active) "
-            "VALUES ($1, $2, 0, NULL, NULL, 1) "
-            "ON CONFLICT(user_id) DO UPDATE SET expiry_date = $3, warned = 0, is_active = 1",
+            "VALUES ($1, $2, FALSE, NULL, NULL, 1) "
+            "ON CONFLICT(user_id) DO UPDATE SET expiry_date = $3, warned = FALSE, is_active = 1",
             (user_id, new_expiry, new_expiry)
         )
         await db.commit()
@@ -362,8 +362,8 @@ async def add_or_update_user(user_id, expiry_date, username=None, first_name=Non
     async with get_db_connection() as db:
         await db.execute('''
             INSERT INTO users (user_id, expiry_date, warned, username, first_name, is_active)
-            VALUES ($1, $2, 0, $3, $4, 1)
-            ON CONFLICT(user_id) DO UPDATE SET expiry_date = $5, warned = 0, username = $6, first_name = $7, is_active = 1
+            VALUES ($1, $2, FALSE, $3, $4, 1)
+            ON CONFLICT(user_id) DO UPDATE SET expiry_date = $5, warned = FALSE, username = $6, first_name = $7, is_active = 1
         ''', user_id, expiry_date, username, first_name, expiry_date, username, first_name)
         await db.commit()
 
@@ -420,7 +420,7 @@ async def get_all_users():
 
 async def mark_user_warned(user_id):
     async with get_db_connection() as db:
-        await db.execute("UPDATE users SET warned = 1 WHERE user_id = $1", (user_id,))
+        await db.execute("UPDATE users SET warned = TRUE WHERE user_id = $1", (user_id,))
         await db.commit()
 
 async def add_scraped_group(group_id, group_title, date_scraped, owner_id=0):
