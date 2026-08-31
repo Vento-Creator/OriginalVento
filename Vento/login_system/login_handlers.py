@@ -112,13 +112,7 @@ class LoginHandlers:
             success, message_text, client_obj, phone_code_hash = await self.login_service.submit_phone(user_id, phone)
             
             if success:
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE),
-                        InlineKeyboardButton(LoginConstants.BUTTON_CODE_HELP, callback_data=LoginConstants.CALLBACK_CODE_HELP)
-                    ],
-                    [InlineKeyboardButton(LoginConstants.BUTTON_CANCEL, callback_data=LoginConstants.CALLBACK_CANCEL_LOGIN)]
-                ])
+                keyboard = self._code_keyboard()
                 
                 current = await self.login_service.state_manager.get_session(user_id)
                 await msg.edit_text(
@@ -564,8 +558,22 @@ class LoginHandlers:
         else:
             await callback_query.answer("⏳ Hali tasdiqlanmadi. Admin javobini kuting.", show_alert=True)
     
-    async def handle_resend_code(self, client: Client, callback_query: CallbackQuery):
-        """Handle code resend request"""
+    def _code_keyboard(self) -> InlineKeyboardMarkup:
+        """Keyboard shown while waiting for the code, including an explicit
+        'resend as SMS' option (force_sms) for when Telegram delivers the code
+        in-app and the user cannot see it (off phone / no active client)."""
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE),
+                InlineKeyboardButton(LoginConstants.BUTTON_RESEND_SMS, callback_data=LoginConstants.CALLBACK_RESEND_SMS),
+            ],
+            [InlineKeyboardButton(LoginConstants.BUTTON_CODE_HELP, callback_data=LoginConstants.CALLBACK_CODE_HELP)],
+            [InlineKeyboardButton(LoginConstants.BUTTON_CANCEL, callback_data=LoginConstants.CALLBACK_CANCEL_LOGIN)]
+        ])
+
+    async def handle_resend_code(self, client: Client, callback_query: CallbackQuery, force_sms: bool = False):
+        """Handle code resend request. force_sms=True issues a fresh raw
+        auth.SendCode(current_number=False) so Telegram delivers a real SMS."""
         user_id = callback_query.from_user.id
         from login_system import LoginState
         
@@ -576,18 +584,15 @@ class LoginHandlers:
             return
         
         try:
-            success, message = await self.login_service.resend_code(user_id)
+            success, message = await self.login_service.resend_code(user_id, force_sms=force_sms)
             
             if success:
                 session = await self.login_service.state_manager.get_session(user_id)
-                await callback_query.answer("✅ Kod qayta yuborildi", show_alert=True)
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE),
-                        InlineKeyboardButton(LoginConstants.BUTTON_CODE_HELP, callback_data=LoginConstants.CALLBACK_CODE_HELP)
-                    ],
-                    [InlineKeyboardButton(LoginConstants.BUTTON_CANCEL, callback_data=LoginConstants.CALLBACK_CANCEL_LOGIN)]
-                ])
+                if force_sms:
+                    await callback_query.answer("✅ SMS kod yuborildi", show_alert=True)
+                else:
+                    await callback_query.answer("✅ Kod qayta yuborildi", show_alert=True)
+                keyboard = self._code_keyboard()
                 await callback_query.message.edit_text(
                     self._code_message(session) + "\n\n" + message,
                     reply_markup=keyboard
@@ -610,13 +615,7 @@ class LoginHandlers:
             return
         
         # Show help message
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE),
-                InlineKeyboardButton("✅ Tushundim", callback_data="close_help")
-            ],
-            [InlineKeyboardButton(LoginConstants.BUTTON_CANCEL, callback_data=LoginConstants.CALLBACK_CANCEL_LOGIN)]
-        ])
+        keyboard = self._code_keyboard()
         
         await callback_query.message.edit_text(
             self.settings.messages["code_not_received"],
@@ -802,6 +801,14 @@ async def resend_code_callback(client: Client, callback_query: CallbackQuery):
     await login_handlers.handle_resend_code(client, callback_query)
 
 
+@Client.on_callback_query(filters.regex("^resend_code_sms$"))
+@handle_errors("login", "user_id", auto_retry=False)
+async def resend_code_sms_callback(client: Client, callback_query: CallbackQuery):
+    """Handle 'resend as SMS' request - forces Telegram to deliver a real SMS
+    code (current_number=False) instead of an in-app notification."""
+    await login_handlers.handle_resend_code(client, callback_query, force_sms=True)
+
+
 @Client.on_callback_query(filters.regex("^code_help$"))
 @handle_errors("login", "user_id", auto_retry=False)
 async def code_help_callback(client: Client, callback_query: CallbackQuery):
@@ -822,13 +829,7 @@ async def close_help_callback(client: Client, callback_query: CallbackQuery):
         await callback_query.answer("❌ Sessiya topilmadi", show_alert=True)
         return
     
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(LoginConstants.BUTTON_RESEND_CODE, callback_data=LoginConstants.CALLBACK_RESEND_CODE),
-            InlineKeyboardButton(LoginConstants.BUTTON_CODE_HELP, callback_data=LoginConstants.CALLBACK_CODE_HELP)
-        ],
-        [InlineKeyboardButton(LoginConstants.BUTTON_CANCEL, callback_data=LoginConstants.CALLBACK_CANCEL_LOGIN)]
-    ])
+    keyboard = login_handlers._code_keyboard()
     
     await callback_query.message.edit_text(
         login_handlers._code_message(session),

@@ -546,13 +546,43 @@ class AuthManager:
             else:
                 raise LoginError(f"Kod yuborishda xatolik: {e}")
     
-    async def resend_code(self, client: Client, phone: str, phone_code_hash: str) -> Tuple[bool, str, Optional[str], dict, int]:
-        """Resend using Telegram's auth.resendCode flow and return server metadata."""
+    async def resend_code(self, client: Client, phone: str, phone_code_hash: str, force_sms: bool = False) -> Tuple[bool, str, Optional[str], dict, int]:
+        """Resend using Telegram's auth.resendCode flow and return server metadata.
+
+        When ``force_sms`` is True, instead of resendCode (which may re-deliver
+        via the App to a location the user cannot see), issue a FRESH raw
+        auth.SendCode with CodeSettings(current_number=False). This forces
+        Telegram to deliver a real SMS code.
+        """
         try:
-            sent = await asyncio.wait_for(
-                client.resend_code(phone, phone_code_hash),
-                timeout=10.0
-            )
+            if force_sms:
+                from pyrogram.raw.functions.auth import SendCode
+                from pyrogram.raw.types import CodeSettings
+
+                sent = await asyncio.wait_for(
+                    client.invoke(
+                        SendCode(
+                            phone_number=phone,
+                            api_id=client.api_id,
+                            api_hash=client.api_hash,
+                            settings=CodeSettings(
+                                allow_flashcall=False,
+                                current_number=False,
+                                allow_app_hash=False,
+                                allow_missed_call=False,
+                                allow_firebase=False,
+                                unknown_number=False,
+                            ),
+                        )
+                    ),
+                    timeout=10.0,
+                )
+                logger.info("resend_code force_sms: fresh auth.SendCode with current_number=False")
+            else:
+                sent = await asyncio.wait_for(
+                    client.resend_code(phone, phone_code_hash),
+                    timeout=10.0,
+                )
             meta = self._sent_code_metadata(sent)
             wait = max(0, int(meta.get("server_timeout", 0) or 0))
             method = meta.get("delivery_method") or "Telegram tanlagan usul"
@@ -899,9 +929,17 @@ class LoginService:
         await self.state_manager.cleanup_session(user_id)
         return True
     
-    async def resend_code(self, user_id: int) -> Tuple[bool, str]:
+    async def resend_code(self, user_id: int, force_sms: bool = False) -> Tuple[bool, str]:
         """
         Resend verification code with alternative methods
+        
+        Args:
+            user_id: User ID
+            force_sms: When True, issue a fresh raw auth.SendCode with
+                       CodeSettings(current_number=False). This forces Telegram
+                       to deliver a real SMS code instead of an in-app
+                       notification (which silently lands in a location the
+                       user cannot see, e.g. an off phone or a stale session).
         
         Returns:
             (success, message)
@@ -918,7 +956,8 @@ class LoginService:
             success, method_or_message, new_hash, meta, server_wait = await self.auth_manager.resend_code(
                 session.client,
                 session.phone,
-                session.phone_code_hash
+                session.phone_code_hash,
+                force_sms=force_sms
             )
             if success and new_hash:
                 await self.state_manager.update_code_hash(user_id, new_hash)

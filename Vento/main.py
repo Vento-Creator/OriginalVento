@@ -41,9 +41,9 @@ app = Client(
     bot_token=BOT_TOKEN,
     workdir=BASE_DIR,
     plugins=dict(root="plugins"),
-    device_model="Vento Client",
-    app_version="Vento Userbot v3.0",
-    system_version="Windows 11 Pro 24H2"
+    device_model="iPhone",
+    app_version="11.7.2",
+    system_version="iOS 17.5.1"
 )
 
 async def subscription_checker():

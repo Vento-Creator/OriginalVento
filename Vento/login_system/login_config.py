@@ -88,6 +88,7 @@ class LoginConstants:
     CALLBACK_ADMIN_INVOICE_PREFIX = "admin_invoice_"
     CALLBACK_CHECK_APPROVAL = "check_admin_approval"
     CALLBACK_RESEND_CODE = "resend_code"
+    CALLBACK_RESEND_SMS = "resend_code_sms"
     CALLBACK_CODE_HELP = "code_help"
     
     # Buttons
@@ -97,6 +98,7 @@ class LoginConstants:
     BUTTON_INVOICE = "💳 To'lov fakturasini yuborish"
     BUTTON_CHECK_APPROVAL = "🔄 Tasdiqlashni tekshirish"
     BUTTON_RESEND_CODE = "🔄 Kodni qayta yuborish"
+    BUTTON_RESEND_SMS = "📨 SMS orqali yuborish"
     BUTTON_CODE_HELP = "❓ Kod kelmadimi?"
     
     # Time limits
