@@ -1462,7 +1462,7 @@ async def add_utag_timer(user_id: int, chat_id: int, message_text: str, interval
     async with get_db_connection() as db:
         await db.execute('''
             INSERT INTO utag_timers (user_id, chat_id, message_text, interval_minutes, repeat_count, repeat_delay, is_active, last_sent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)
+            VALUES (?, ?, ?, ?, ?, ?, TRUE, 0, ?)
             ON CONFLICT (user_id, chat_id) DO UPDATE SET
                 message_text = EXCLUDED.message_text,
                 interval_minutes = EXCLUDED.interval_minutes,
