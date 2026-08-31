@@ -41,6 +41,28 @@ class LoginHandlers:
     def _code_message(self, session) -> str:
         method = session.delivery_method or "Telegram tomonidan tanlangan usul"
         info = f"📬 **Yuborish usuli:** {method}"
+
+        # Telegram very often delivers the code INSIDE the Telegram app
+        # (official "Telegram" service chat) instead of SMS. Users keep
+        # waiting for an SMS and report "kod kelmadi". Give explicit,
+        # method-specific instructions so nobody waits for the wrong thing.
+        method_lower = (method or "").lower()
+        if "ilovasi" in method_lower:
+            info += (
+                "\n\n📲 **MUHIM: kod SMS ga emas, sizning Telegram ilovangiz ICHIGA yuborildi!**\n"
+                "➡️ Telegram ilovasini oching.\n"
+                "➡️ Rasmiy **«Telegram»** chatini oching (qizil belgi bilan, o'zbekcha \"Telegram\", "
+                "inglizcha \"Telegram\").\n"
+                "➡️ U yerda **6 xonali kodingiz** yozib turadi.\n"
+                "❗️ Bu chat boshqa chatlar orasida ko'rinmasligi mumkin — qidiruvda «Telegram» deb yozing.\n"
+                "❗️ Kod SMS xabarlar bo'limida bo'lmaydi!"
+            )
+        elif "sms" in method_lower:
+            info += (
+                "\n\n📩 Kod **SMS sifatida** yuborildi. SMS kelmasa 1-2 daqiqa kuting, "
+                "so'ng «🔄 Qayta yuborish» bosing."
+            )
+
         if session.next_delivery_method:
             info += f"\n⏭️ **Keyingi usul:** {session.next_delivery_method}"
         if session.server_code_timeout:
