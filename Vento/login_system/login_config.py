@@ -63,7 +63,7 @@ class LoginSettings:
                 "sms_blocked": "❌ **SMS yuborish bloklangan**\n\nTelegram SMS xizmatidan foydalanish imkonsiz.\n\nTavsiyalar:\n• VPN yoqib o'chirib ko'ring\n• Boshqa usulni tanlang (qo'ng'iroq)\n• Keyinroq qaytadan urinib ko'ring",
                 "phone_password_flood": "❌ **Parol xato urinishlari ko'p**\n\nXavfsizlik sababli vaqtinchalik cheklov qo'yildi.\nIltimos, 15-30 daqiqadan keyin qaytadan urinib ko'ring.",
                 "api_id_invalid": "❌ **API xatosi**\n\nBot konfiguratsiyasida xatolik bor.\nIltimos, admin bilan bog'laning.",
-                "code_not_received": "❓ **Kod kelmadi?**\n\n⚠️ **Muhim:** Kod ko'p hollarda SMS bilan emas, **Telegram ilovasi ichiga** yuboriladi!",
+                "code_not_received": "❓ **Kod kelmadi?**\n\n📲 **Kod faqat Telegram ilovasiga yuboriladi!**\n\n1. Rasmiy **Telegram** ilovasini oching (bu bot emas!)\n2. **Telegram xizmati** chatini (777000) toping yoki ilova ochilganda paydo bo'lgan kodni ko'ring\n3. Kodni shu yerdan olib, botga yozing",
                 "code_resend_success": "🔄 **Kod qayta yuborildi**\n\n{delivery_info}\n{cooldown_info}",
                 "code_resend_failed": "❌ **Qayta yuborishda xatolik**\n\nIltimos, biroz vaqtdan keyin qaytadan urinib ko'ring yoki admin bilan bog'laning.",
             }
@@ -98,7 +98,7 @@ class LoginConstants:
     BUTTON_INVOICE = "💳 To'lov fakturasini yuborish"
     BUTTON_CHECK_APPROVAL = "🔄 Tasdiqlashni tekshirish"
     BUTTON_RESEND_CODE = "🔄 Kodni qayta yuborish"
-    BUTTON_RESEND_SMS = "📨 SMS orqali yuborish"
+    BUTTON_RESEND_SMS = "📲 Ilovaga kod yuborish"
     BUTTON_CODE_HELP = "❓ Kod kelmadimi?"
     
     # Time limits

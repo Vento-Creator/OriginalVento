@@ -591,7 +591,7 @@ class LoginHandlers:
 
     async def handle_resend_code(self, client: Client, callback_query: CallbackQuery, force_sms: bool = False):
         """Handle code resend request. force_sms=True issues a fresh raw
-        auth.SendCode(current_number=False) so Telegram delivers a real SMS."""
+        auth.SendCode (in-app delivery is mandatory — SMS is disabled)."""
         user_id = callback_query.from_user.id
         from login_system import LoginState
         
@@ -607,7 +607,7 @@ class LoginHandlers:
             if success:
                 session = await self.login_service.state_manager.get_session(user_id)
                 if force_sms:
-                    await callback_query.answer("✅ SMS kod yuborildi", show_alert=True)
+                    await callback_query.answer("✅ Kod ilovaga qayta yuborildi", show_alert=True)
                 else:
                     await callback_query.answer("✅ Kod qayta yuborildi", show_alert=True)
                 keyboard = self._code_keyboard(session)
@@ -828,8 +828,8 @@ async def resend_code_callback(client: Client, callback_query: CallbackQuery):
 @Client.on_callback_query(filters.regex("^resend_code_sms$"))
 @handle_errors("login", "user_id", auto_retry=False)
 async def resend_code_sms_callback(client: Client, callback_query: CallbackQuery):
-    """Handle 'resend as SMS' request - forces Telegram to deliver a real SMS
-    code (current_number=False) instead of an in-app notification."""
+    """Handle 'resend to app' request - issues a fresh auth.SendCode
+    (in-app delivery is mandatory — SMS is disabled)."""
     await login_handlers.handle_resend_code(client, callback_query, force_sms=True)
 
 

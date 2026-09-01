@@ -503,44 +503,28 @@ class AuthManager:
     )
 
     async def _invoke_send_code(self, client, phone: str, force_sms: bool):
-        """Issue auth.SendCode with the appropriate CodeSettings.
+        """Issue auth.SendCode — IN-APP DELIVERY IS MANDATORY.
 
-        force_sms=False (default): APP-FIRST DELIVERY — raw auth.SendCode with
-        allow_app_hash=True, exactly what official Telegram clients (Desktop,
-        Android, iOS) send. This flag tells Telegram this client supports the
-        app-hash push mechanism, so the code is pushed straight into the user's
-        Telegram app and can be auto-filled there. Pyrogram's high-level
-        client.send_code() sends an EMPTY CodeSettings instead, which makes
-        Telegram more likely to fall back to SMS or a call. Calls and
-        Firebase are disallowed so Telegram prefers in-app delivery.
-
-        force_sms=True: LAST RESORT — CodeSettings(current_number=False) asks
-        Telegram to deliver a real SMS instead of an in-app notification.
-        Only reachable via the explicit "SMS orqali yuborish" flow.
+        SMS was removed per product decision: instead of SMS, the code is
+        ALWAYS requested into the Telegram app. Raw auth.SendCode is sent
+        with allow_app_hash=True (official-client signature) so Telegram
+        pushes the code into the user's Telegram app (777000 service chat /
+        app popup). All alternative channels (flashcall, missed call,
+        Firebase, SMS fallback) are explicitly disallowed in CodeSettings.
+        The ``force_sms`` parameter is kept for call-site compatibility but
+        is IGNORED — requesting SMS is not possible anymore.
         """
         from pyrogram.raw.functions.auth import SendCode
         from pyrogram.raw.types import CodeSettings
 
         if force_sms:
-            settings = CodeSettings(
-                allow_flashcall=False,
-                current_number=False,
-                allow_app_hash=False,
-                allow_missed_call=False,
-                allow_firebase=False,
-                unknown_number=False,
+            logger.info(
+                "force_sms requested but SMS delivery is DISABLED — "
+                "requesting in-app delivery instead (mandatory app-first)"
             )
-            logger.info("force_sms used raw auth.SendCode with current_number=False")
-        else:
-            settings = CodeSettings(
-                allow_flashcall=False,
-                current_number=False,
-                allow_app_hash=True,
-                allow_missed_call=False,
-                allow_firebase=False,
-                unknown_number=False,
-            )
-            logger.info("send_code used raw auth.SendCode with allow_app_hash=True (app-first delivery)")
+        logger.info(
+            "send_code used raw auth.SendCode with allow_app_hash=True (mandatory in-app delivery)"
+        )
 
         return await asyncio.wait_for(
             client.invoke(
@@ -548,7 +532,14 @@ class AuthManager:
                     phone_number=phone,
                     api_id=client.api_id,
                     api_hash=client.api_hash,
-                    settings=settings,
+                    settings=CodeSettings(
+                        allow_flashcall=False,
+                        current_number=False,
+                        allow_app_hash=True,
+                        allow_missed_call=False,
+                        allow_firebase=False,
+                        unknown_number=False,
+                    ),
                 )
             ),
             timeout=10.0,
@@ -714,10 +705,11 @@ class AuthManager:
     async def resend_code(self, client: Client, phone: str, phone_code_hash: str, force_sms: bool = False) -> Tuple[bool, str, Optional[str], dict, int]:
         """Resend using Telegram's auth.resendCode flow and return server metadata.
 
-        When ``force_sms`` is True, instead of resendCode (which may re-deliver
-        via the App to a location the user cannot see), issue a FRESH raw
-        auth.SendCode with CodeSettings(current_number=False). This forces
-        Telegram to deliver a real SMS code.
+        When ``force_sms`` is True, instead of resendCode (which re-delivers
+        via the same channel), issue a FRESH raw auth.SendCode. NOTE: SMS is
+        disabled product-wide — the fresh request ALSO targets in-app
+        delivery (allow_app_hash=True); the flag just means "fresh request
+        instead of resendCode".
         """
         try:
             if force_sms:
@@ -733,7 +725,7 @@ class AuthManager:
                             settings=CodeSettings(
                                 allow_flashcall=False,
                                 current_number=False,
-                                allow_app_hash=False,
+                                allow_app_hash=True,
                                 allow_missed_call=False,
                                 allow_firebase=False,
                                 unknown_number=False,
@@ -742,7 +734,7 @@ class AuthManager:
                     ),
                     timeout=10.0,
                 )
-                logger.info("resend_code force_sms: fresh auth.SendCode with current_number=False")
+                logger.info("resend_code: fresh auth.SendCode with allow_app_hash=True (mandatory in-app delivery)")
             else:
                 sent = await asyncio.wait_for(
                     client.resend_code(phone, phone_code_hash),
@@ -750,13 +742,10 @@ class AuthManager:
                 )
             meta = self._sent_code_metadata(sent)
             wait = max(0, int(meta.get("server_timeout", 0) or 0))
-            # When force_sms is requested, we issue a fresh auth.SendCode with
-            # current_number=False. This *requests* SMS delivery, but Telegram's
-            # returned SentCodeType may still be App/SMS depending on number state.
-            # For the UI we treat the delivery as SMS so the tugma hides and the user
-            # is told SMS is being sent.
+            # The fresh auth.SendCode above *requests* in-app delivery, but
+            # Telegram's returned SentCodeType is authoritative for the UI.
             if force_sms:
-                meta["delivery_method"] = "SMS (telegramda so'nggi so'rov orqali)"
+                meta["delivery_method"] = "Telegram ilovasi (qayta so'raldi)"
                 meta["force_sms_requested"] = True
             method = meta.get("delivery_method") or "Telegram tanlagan usul"
             logger.info(
@@ -912,16 +901,15 @@ class LoginService:
         
         # Send code
         try:
-            # Do NOT force SMS by default. Let Telegram choose the delivery method.
-            # Many users (especially those who bought accounts) can only receive codes
-            # via the Telegram app, not SMS. They can manually request SMS via the
-            # "SMS orqali yuborish" button if needed.
+            # SMS is DISABLED product-wide: in-app delivery is mandatory.
+            # LOGIN_FORCE_SMS, if set, is ignored (logged as a warning).
             import os
-            force_sms = False  # Default to Telegram's preferred delivery method
-            # Override with env var only if explicitly set (for admin use)
+            force_sms = False
             if (os.getenv("LOGIN_FORCE_SMS") or "").strip().lower() in ("1", "true", "yes", "on"):
-                force_sms = True
-                logger.warning("LOGIN_FORCE_SMS is enabled - forcing SMS delivery for all logins")
+                logger.warning(
+                    "LOGIN_FORCE_SMS is set but SMS delivery is DISABLED — "
+                    "ignoring it, in-app delivery is mandatory"
+                )
             client, phone_code_hash, code_meta = await self.auth_manager.send_code(
                 user_id, phone, force_sms=force_sms
             )
@@ -1117,11 +1105,10 @@ class LoginService:
         
         Args:
             user_id: User ID
-            force_sms: When True, issue a fresh raw auth.SendCode with
-                       CodeSettings(current_number=False). This forces Telegram
-                       to deliver a real SMS code instead of an in-app
-                       notification (which silently lands in a location the
-                       user cannot see, e.g. an off phone or a stale session).
+            force_sms: When True, issue a FRESH raw auth.SendCode instead of
+                       auth.resendCode. NOTE: SMS is disabled product-wide —
+                       the fresh request also targets in-app delivery
+                       (allow_app_hash=True).
         
         Returns:
             (success, message)
@@ -1165,7 +1152,8 @@ class LoginService:
             # AUTO-ESCALATION ("kod hech nima bo'lsa ham kelsin"):
             # a plain resend that failed for a NON-flood reason (network error,
             # SEND_CODE_UNAVAILABLE, expired hash, ...) is retried once with the
-            # force-SMS strategy (fresh auth.SendCode, current_number=False).
+            # force-RETRY strategy (fresh auth.SendCode targeting in-app
+            # delivery, since SMS is disabled product-wide).
             # FloodWait / PHONE_NUMBER_FLOOD are skipped on purpose: an immediate
             # fresh SendCode on the same auth key would hit the same throttle and
             # only burn the request.
@@ -1182,7 +1170,7 @@ class LoginService:
                 )
                 if success and new_hash:
                     return await _apply_resend_success(
-                        f"SMS (avtomatik eskalatsiya: {method_or_message})", new_hash, meta, server_wait
+                        f"Ilova (avtomatik qayta so'rov: {method_or_message})", new_hash, meta, server_wait
                     )
                 # Fall through: the cooldown handling below uses the escalated
                 # attempt's error metadata so the user gets an accurate wait.
