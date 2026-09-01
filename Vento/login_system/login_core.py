@@ -585,6 +585,7 @@ class AuthManager:
             total = len(candidates)
             for attempt, credential in enumerate(candidates, start=1):
                 client = None
+                code_sent = False
                 try:
                     self.credential_pool.mark_tried(credential)
                     client = PyroClient(
@@ -607,6 +608,7 @@ class AuthManager:
                     await asyncio.wait_for(client.connect(), timeout=10.0)
                     
                     sent = await self._invoke_send_code(client, phone, force_sms)
+                    code_sent = True
                     logger.info(
                         "Code sent successfully to %s (api_id=%s, attempt=%s/%s, delivery=%s)",
                         self._mask_phone_number(phone),
@@ -649,13 +651,20 @@ class AuthManager:
                         credential.api_id, e, attempt, total,
                     )
                 finally:
-                    if client is not None:
+                    # Only FAILED attempts are torn down here. A successful
+                    # attempt MUST stay connected: the exact same live client
+                    # performs auth.signIn later. invoke() on a disconnected
+                    # client raises ConnectionError("Client has not been
+                    # started yet"), which the code-input handler surfaces as
+                    # a bogus "kod xato" error even when the user typed the
+                    # correct code (finally runs even on `return`).
+                    if client is not None and not code_sent:
                         try:
                             if client.is_connected:
                                 await client.disconnect()
                         except Exception:
                             pass
-                    if attempt < total:
+                    if not code_sent and attempt < total:
                         # Give the next attempt a clean pending session file
                         # (each api pair gets a fresh auth key).
                         try:
