@@ -189,6 +189,44 @@ class LoginStateManager:
             session.updated_at = time.time()
             return True
 
+    async def ensure_code_session(self, user_id: int, *, phone: Optional[str] = None,
+                                  client: Optional[Any] = None,
+                                  phone_code_hash: Optional[str] = None,
+                                  delivery_method: Optional[str] = None,
+                                  next_delivery_method: Optional[str] = None,
+                                  server_code_timeout: int = 0) -> LoginSession:
+        """Create-or-recover a WAITING_CODE session.
+
+        RECOVERY PATH — bypasses VALID_TRANSITIONS on purpose. Called only
+        AFTER a verification code has already been delivered by Telegram:
+        losing the bot-side state at that moment would strand the user
+        (code in flight, bot knows nothing — they would see
+        "'NoneType' object has no attribute 'delivery_method'"). This happens
+        when the pre-login session expired (e.g. the user waited longer than
+        _session_timeout before typing the phone) or was cleaned up.
+        """
+        import time
+        async with self._lock:
+            session = self._sessions.get(user_id)
+            if session is None:
+                session = LoginSession(user_id=user_id, state=LoginState.WAITING_CODE)
+                self._sessions[user_id] = session
+            session.state = LoginState.WAITING_CODE
+            session.updated_at = time.time()
+            if phone is not None:
+                session.phone = phone
+            if client is not None:
+                session.client = client
+            if phone_code_hash is not None:
+                session.phone_code_hash = phone_code_hash
+            if delivery_method is not None:
+                session.delivery_method = delivery_method
+            if next_delivery_method is not None:
+                session.next_delivery_method = next_delivery_method
+            if server_code_timeout:
+                session.server_code_timeout = max(0, int(server_code_timeout))
+            return session
+
     async def get_all_sessions(self) -> Dict[int, LoginSession]:
         """Get all active sessions"""
         async with self._lock:

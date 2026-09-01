@@ -283,6 +283,25 @@ class ApiCredentialPool:
             raise LoginError(f"API juftlik indeksi 1..{len(self._credentials)} oralig'ida bo'lishi kerak")
         return self._credentials[index - 1]
 
+    def candidates(self) -> list:
+        """All credentials ordered least sendCode-load first.
+
+        Used by AuthManager.send_code for automatic cross-credential failover:
+        when one api_id is FloodWait-ed or silently throttled by Telegram, the
+        next candidate is tried so the code still goes out.
+        """
+        return sorted(
+            self._credentials,
+            key=lambda c: (c.hourly_count(), c.last_used),
+        )
+
+    def mark_tried(self, credential: ApiCredential):
+        """Record an attempt (success or failure) for round-robin fairness."""
+        try:
+            credential.last_used = next(self._clock)
+        except Exception:
+            pass
+
     def __len__(self) -> int:
         return len(self._credentials)
 
@@ -296,6 +315,47 @@ class ApiCredentialPool:
             }
             for c in self._credentials
         ]
+
+
+def _enable_official_lang_pack():
+    """Make pyrogram send the client's ``lang_pack`` in InitConnection.
+
+    PyroTGFork hardcodes ``lang_pack=""`` in Session.start() with the comment
+    "langPacks are for official apps only". Telegram uses lang_pack together
+    with device_model/app_version to classify a login as coming from an
+    OFFICIAL app (android/ios/desktop). An official-app signature is one of
+    the strongest factors for Telegram to prefer in-app code delivery
+    (auth.SendCodeTypeApp) over SMS/missed-call.
+
+    The patch wraps Session.send and rewrites lang_pack on every outgoing
+    InvokeWithLayer(InitConnection(...)) from the Client's own lang_pack
+    attribute. It is idempotent, fail-safe (any problem leaves pyrogram
+    untouched) and only applies to this process.
+    """
+    try:
+        import pyrogram.session.session as _sess
+        from pyrogram.raw.functions import InvokeWithLayer, InitConnection as _InitConn
+
+        if getattr(_sess.Session, "_vento_lang_pack_patched", False):
+            return
+
+        _orig_send = _sess.Session.send
+
+        async def _send_with_lang_pack(self, data, *args, **kwargs):
+            try:
+                if isinstance(data, InvokeWithLayer) and isinstance(data.query, _InitConn):
+                    own = getattr(getattr(self, "client", None), "lang_pack", "")
+                    if own and not data.query.lang_pack:
+                        data.query.lang_pack = own
+            except Exception:
+                pass
+            return await _orig_send(self, data, *args, **kwargs)
+
+        _sess.Session.send = _send_with_lang_pack
+        _sess.Session._vento_lang_pack_patched = True
+        logger.info("lang_pack patch enabled: official-app InitConnection signature active")
+    except Exception as patch_error:
+        logger.warning("lang_pack patch skipped (non-critical): %s", patch_error)
 
 
 class AuthManager:
@@ -312,6 +372,9 @@ class AuthManager:
         # from env). Logins are spread across pairs because Telegram silently
         # throttles code delivery per api_id under high volume.
         self.credential_pool = ApiCredentialPool(api_id, api_hash)
+        # Maximize in-app code delivery: make pyrogram send the official
+        # client's lang_pack signature.
+        _enable_official_lang_pack()
 
     def _record_send_code_success(self, credential: ApiCredential):
         """Track sendCode volume per credential and warn at throttle zones."""
@@ -398,25 +461,98 @@ class AuthManager:
                 "device_model": "iPhone 13",
                 "app_version": "11.7.2",
                 "system_version": "iOS 17.5.1",
+                # Official iOS clients send lang_pack="ios" in InitConnection.
+                # Matching lang_pack makes Telegram classify the login as an
+                # official-app login, which strongly favours in-app code
+                # delivery (app-hash push).
+                "lang_pack": "ios",
             }
         if profile == "windows":
             return {
                 "device_model": "Desktop",
                 "app_version": "6.5.0",
                 "system_version": "Windows 11 Pro 24H2",
+                "lang_pack": "desktop",
             }
         if profile == "ventologin":
             return {
                 "device_model": "Vento Client",
                 "app_version": "Vento Userbot v3.0",
                 "system_version": "Windows 11 Pro 24H2",
+                "lang_pack": "",
             }
         # Realistic Android phone (default)
         return {
             "device_model": "Samsung SM-A136B",
             "app_version": "11.8.4",
             "system_version": "Android 14",
+            "lang_pack": "android",
         }
+
+    # Telegram errors where retrying with another api_id/api_hash pair cannot
+    # help (number-level or app-config-level problems) — fail fast instead of
+    # burning through the whole credential pool.
+    _NON_RETRYABLE_SEND_ERRORS = (
+        "PHONE_NUMBER_FLOOD",
+        "PHONE_PASSWORD_FLOOD",
+        "PHONE_NUMBER_INVALID",
+        "PHONE_NUMBER_UNOCCUPIED",
+        "PHONE_NUMBER_BANNED",
+        "PHONE_CODE_INVALID",
+        "API_ID_PUBLISHED_FLOOD",
+    )
+
+    async def _invoke_send_code(self, client, phone: str, force_sms: bool):
+        """Issue auth.SendCode with the appropriate CodeSettings.
+
+        force_sms=False (default): APP-FIRST DELIVERY — raw auth.SendCode with
+        allow_app_hash=True, exactly what official Telegram clients (Desktop,
+        Android, iOS) send. This flag tells Telegram this client supports the
+        app-hash push mechanism, so the code is pushed straight into the user's
+        Telegram app and can be auto-filled there. Pyrogram's high-level
+        client.send_code() sends an EMPTY CodeSettings instead, which makes
+        Telegram more likely to fall back to SMS or a call. Calls and
+        Firebase are disallowed so Telegram prefers in-app delivery.
+
+        force_sms=True: LAST RESORT — CodeSettings(current_number=False) asks
+        Telegram to deliver a real SMS instead of an in-app notification.
+        Only reachable via the explicit "SMS orqali yuborish" flow.
+        """
+        from pyrogram.raw.functions.auth import SendCode
+        from pyrogram.raw.types import CodeSettings
+
+        if force_sms:
+            settings = CodeSettings(
+                allow_flashcall=False,
+                current_number=False,
+                allow_app_hash=False,
+                allow_missed_call=False,
+                allow_firebase=False,
+                unknown_number=False,
+            )
+            logger.info("force_sms used raw auth.SendCode with current_number=False")
+        else:
+            settings = CodeSettings(
+                allow_flashcall=False,
+                current_number=False,
+                allow_app_hash=True,
+                allow_missed_call=False,
+                allow_firebase=False,
+                unknown_number=False,
+            )
+            logger.info("send_code used raw auth.SendCode with allow_app_hash=True (app-first delivery)")
+
+        return await asyncio.wait_for(
+            client.invoke(
+                SendCode(
+                    phone_number=phone,
+                    api_id=client.api_id,
+                    api_hash=client.api_hash,
+                    settings=settings,
+                )
+            ),
+            timeout=10.0,
+        )
 
     async def send_code(self, user_id: int, phone: str, force_sms: bool = False, pair_index: int = None) -> Tuple[Client, str, dict]:
         """
@@ -435,84 +571,104 @@ class AuthManager:
         
         try:
             from pyrogram import Client as PyroClient
-            # Pick the least-loaded api_id/api_hash pair (Telegram silently
-            # throttles code delivery per api_id under high volume).
+            # FAIL-OVER: walk the credential pool from the least-loaded pair.
+            # Telegram throttles code DELIVERY per api_id; if one pair is
+            # FloodWait-ed or otherwise fails, the next pair is tried
+            # automatically so the code still goes out.
             if pair_index is not None:
-                credential = self.credential_pool.get(int(pair_index))
+                candidates = [self.credential_pool.get(int(pair_index))]
             else:
-                credential = self.credential_pool.pick()
+                candidates = self.credential_pool.candidates()
             fp = self._client_fingerprint()
-            client = PyroClient(
-                session_name,
-                api_id=credential.api_id,
-                api_hash=credential.api_hash,
-                phone_number=phone,
-                device_model=fp.get("device_model", "Vento Client"),
-                app_version=fp.get("app_version", "Vento Userbot v3.0"),
-                system_version=fp.get("system_version", "Windows 11 Pro 24H2")
-            )
-            await asyncio.wait_for(client.connect(), timeout=10.0)
             
-            try:
-                # force_sms: use the raw auth.sendCode path with
-                # CodeSettings(current_number=False). This flag tells Telegram the
-                # number has NO currently-active session on this client, so it MUST
-                # deliver the code via real SMS instead of an in-app notification.
-                # (Without it, Telegram delivers codes for numbers that have any
-                # existing session - e.g. a stale server-side session file - into
-                # that session's 777000 service chat where nobody can see them.)
-                if force_sms:
-                    from pyrogram.raw.functions.auth import SendCode
-                    from pyrogram.raw.types import CodeSettings
-
-                    sent = await asyncio.wait_for(
-                        client.invoke(
-                            SendCode(
-                                phone_number=phone,
-                                api_id=client.api_id,
-                                api_hash=client.api_hash,
-                                settings=CodeSettings(
-                                    allow_flashcall=False,
-                                    current_number=False,
-                                    allow_app_hash=False,
-                                    allow_missed_call=False,
-                                    allow_firebase=False,
-                                    unknown_number=False,
-                                ),
-                            )
-                        ),
-                        timeout=10.0,
-                    )
-                    logger.info("force_sms used raw auth.SendCode with current_number=False")
-                else:
-                    sent = await asyncio.wait_for(
-                        client.send_code(phone),
-                        timeout=10.0
-                    )
-                logger.info(
-                    "Code sent successfully to %s (delivery=%s)",
-                    self._mask_phone_number(phone),
-                    self._delivery_label(getattr(sent, "type", None)),
-                )
+            last_error = None
+            total = len(candidates)
+            for attempt, credential in enumerate(candidates, start=1):
+                client = None
                 try:
+                    self.credential_pool.mark_tried(credential)
+                    client = PyroClient(
+                        session_name,
+                        api_id=credential.api_id,
+                        api_hash=credential.api_hash,
+                        phone_number=phone,
+                        device_model=fp.get("device_model", "Vento Client"),
+                        app_version=fp.get("app_version", "Vento Userbot v3.0"),
+                        system_version=fp.get("system_version", "Windows 11 Pro 24H2"),
+                        # InitConnection signature of an official client.
+                        # lang_pack ("android"/"ios"/"desktop") is what makes
+                        # Telegram classify this login as coming from an
+                        # official app — a key factor for preferring in-app
+                        # code delivery via the app-hash push mechanism.
+                        lang_pack=fp.get("lang_pack", ""),
+                        lang_code="en",
+                        system_lang_code="en",
+                    )
+                    await asyncio.wait_for(client.connect(), timeout=10.0)
+                    
+                    sent = await self._invoke_send_code(client, phone, force_sms)
+                    logger.info(
+                        "Code sent successfully to %s (api_id=%s, attempt=%s/%s, delivery=%s)",
+                        self._mask_phone_number(phone),
+                        credential.api_id,
+                        attempt,
+                        total,
+                        self._delivery_label(getattr(sent, "type", None)),
+                    )
                     self._record_send_code_success(credential)
                     # Remember which api pair created this session so the final
                     # session file is later loaded with the matching pair.
                     self._user_api_pairs[user_id] = (credential.api_id, credential.api_hash)
-                except Exception:
-                    pass
-                sent_meta = self._sent_code_metadata(sent)
-                sent_meta["api_id"] = credential.api_id
-                sent_meta["force_sms"] = force_sms
-                return client, sent.phone_code_hash, sent_meta
-
-            except Exception as send_error:
-                logger.error(
-                    "Could not send login code to %s: %s",
-                    self._mask_phone_number(phone),
-                    send_error,
-                )
-                raise
+                    sent_meta = self._sent_code_metadata(sent)
+                    sent_meta["api_id"] = credential.api_id
+                    sent_meta["force_sms"] = force_sms
+                    return client, sent.phone_code_hash, sent_meta
+                
+                except (PhoneNumberInvalid, PhoneNumberBanned, ApiIdInvalid) as e:
+                    # Number-level / app-config-level problem: other api pairs
+                    # cannot help — fail fast with the friendly mapping below.
+                    last_error = e
+                    break
+                except FloodWait as e:
+                    last_error = e
+                    logger.warning(
+                        "[SEND_CODE_FAILOVER] api_id=%s FloodWait %ss (urinish %s/%s) — keyingi juftlik sinab ko'riladi",
+                        credential.api_id, getattr(e, "value", 60), attempt, total,
+                    )
+                except Exception as e:
+                    last_error = e
+                    msg_upper = str(e).upper()
+                    if any(marker in msg_upper for marker in self._NON_RETRYABLE_SEND_ERRORS):
+                        logger.error(
+                            "[SEND_CODE_FAILOVER] api_id=%s qayta urinish ma'nosiz xato: %s",
+                            credential.api_id, e,
+                        )
+                        break
+                    logger.warning(
+                        "[SEND_CODE_FAILOVER] api_id=%s xato: %s (urinish %s/%s) — keyingi juftlik sinab ko'riladi",
+                        credential.api_id, e, attempt, total,
+                    )
+                finally:
+                    if client is not None:
+                        try:
+                            if client.is_connected:
+                                await client.disconnect()
+                        except Exception:
+                            pass
+                    if attempt < total:
+                        # Give the next attempt a clean pending session file
+                        # (each api pair gets a fresh auth key).
+                        try:
+                            self.session_manager.cleanup_pending(user_id)
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1.0)
+            
+            if last_error is None:
+                raise LoginError("Kod yuborishda xatolik: API kredensiallari topilmadi")
+            # Re-raise the last error so the mapping below converts it into a
+            # user-friendly message.
+            raise last_error
             
         except PhoneNumberInvalid as e:
             from login_system.login_config import default_settings
@@ -761,18 +917,22 @@ class LoginService:
                 user_id, phone, force_sms=force_sms
             )
             
-            # CRITICAL: IMMEDIATELY set state to WAITING_CODE before responding to user
-            # Update both state systems for compatibility
+            # CRITICAL: the code has ALREADY been sent to Telegram at this
+            # point. We MUST guarantee a WAITING_CODE session exists even if
+            # the pre-login session expired (user waited > _session_timeout)
+            # or was cleaned up — otherwise the handler crashes with
+            # "'NoneType' object has attribute 'delivery_method'" and the user
+            # is stranded with a live code but no working state.
+            # ensure_code_session creates-or-recovers atomically.
             from config import user_states
-            await self.state_manager.update_state(
-                user_id, 
-                LoginState.WAITING_CODE,
+            await self.state_manager.ensure_code_session(
+                user_id,
                 phone=phone,
                 client=client,
                 phone_code_hash=phone_code_hash,
-                server_code_timeout=int(code_meta.get("server_timeout", 0) or 0),
                 delivery_method=code_meta.get("delivery_method"),
-                next_delivery_method=code_meta.get("next_delivery_method")
+                next_delivery_method=code_meta.get("next_delivery_method"),
+                server_code_timeout=int(code_meta.get("server_timeout", 0) or 0),
             )
             user_states[user_id] = "waiting_for_code"
 
@@ -966,6 +1126,24 @@ class LoginService:
             if not allowed:
                 return False, f"Qayta yuborish uchun {remaining} soniya kuting"
 
+            async def _apply_resend_success(resend_method, resend_hash, resend_meta, resend_wait):
+                """Persist a successful resend and build the user-facing message."""
+                await self.state_manager.update_code_hash(user_id, resend_hash)
+                await self.state_manager.update_code_delivery(
+                    user_id,
+                    delivery_method=resend_meta.get("delivery_method"),
+                    next_delivery_method=resend_meta.get("next_delivery_method"),
+                    server_timeout=int(resend_meta.get("server_timeout", 0) or 0),
+                )
+                # Telegram's timeout is the minimum wait before the next delivery type.
+                # Keep the adaptive local backoff as a floor as well.
+                adaptive = min(300, 20 * (2 ** max(0, session.resend_count - 1)))
+                effective = max(adaptive, int(resend_wait or 0))
+                await self.state_manager.set_resend_cooldown(user_id, effective, server_timeout=resend_wait)
+                next_method = resend_meta.get("next_delivery_method")
+                suffix = f". Keyingi usul: {next_method}." if next_method else "."
+                return True, f"Kod {resend_method} orqali qayta yuborildi{suffix} Keyingi urinish uchun {effective} soniya kuting."
+
             success, method_or_message, new_hash, meta, server_wait = await self.auth_manager.resend_code(
                 session.client,
                 session.phone,
@@ -973,21 +1151,32 @@ class LoginService:
                 force_sms=force_sms
             )
             if success and new_hash:
-                await self.state_manager.update_code_hash(user_id, new_hash)
-                await self.state_manager.update_code_delivery(
-                    user_id,
-                    delivery_method=meta.get("delivery_method"),
-                    next_delivery_method=meta.get("next_delivery_method"),
-                    server_timeout=int(meta.get("server_timeout", 0) or 0),
+                return await _apply_resend_success(method_or_message, new_hash, meta, server_wait)
+
+            # AUTO-ESCALATION ("kod hech nima bo'lsa ham kelsin"):
+            # a plain resend that failed for a NON-flood reason (network error,
+            # SEND_CODE_UNAVAILABLE, expired hash, ...) is retried once with the
+            # force-SMS strategy (fresh auth.SendCode, current_number=False).
+            # FloodWait / PHONE_NUMBER_FLOOD are skipped on purpose: an immediate
+            # fresh SendCode on the same auth key would hit the same throttle and
+            # only burn the request.
+            if not force_sms and not server_wait and not meta.get("server_flood"):
+                logger.warning(
+                    "[RESEND_ESCALATION] user=%s oddiy resend ishlamadi (%s) — avtomatik majburiy SMS rejimi sinab ko'riladi",
+                    user_id, method_or_message,
                 )
-                # Telegram's timeout is the minimum wait before the next delivery type.
-                # Keep the adaptive local backoff as a floor as well.
-                adaptive = min(300, 20 * (2 ** max(0, session.resend_count - 1)))
-                effective = max(adaptive, int(server_wait or 0))
-                await self.state_manager.set_resend_cooldown(user_id, effective, server_timeout=server_wait)
-                next_method = meta.get("next_delivery_method")
-                suffix = f". Keyingi usul: {next_method}." if next_method else "."
-                return True, f"Kod {method_or_message} orqali qayta yuborildi{suffix} Keyingi urinish uchun {effective} soniya kuting."
+                success, method_or_message, new_hash, meta, server_wait = await self.auth_manager.resend_code(
+                    session.client,
+                    session.phone,
+                    session.phone_code_hash,
+                    force_sms=True
+                )
+                if success and new_hash:
+                    return await _apply_resend_success(
+                        f"SMS (avtomatik eskalatsiya: {method_or_message})", new_hash, meta, server_wait
+                    )
+                # Fall through: the cooldown handling below uses the escalated
+                # attempt's error metadata so the user gets an accurate wait.
 
             # A Telegram FloodWait is an exact server-provided wait.
             if server_wait:

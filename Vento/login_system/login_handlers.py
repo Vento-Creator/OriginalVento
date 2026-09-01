@@ -39,7 +39,9 @@ class LoginHandlers:
                 self.approval_decisions.pop(key, None)
     
     def _code_message(self, session) -> str:
-        method = session.delivery_method or "Telegram tomonidan tanlangan usul"
+        # None-safe: a missing session must never crash the handler.
+        method = (getattr(session, "delivery_method", None)
+                  or "Telegram tomonidan tanlangan usul")
         info = f"📬 **Yuborish usuli:** {method}"
 
         # Telegram very often delivers the code INSIDE the Telegram app
@@ -66,10 +68,12 @@ class LoginHandlers:
                 "so'ng «🔄 Qayta yuborish» bosing."
             )
 
-        if session.next_delivery_method:
-            info += f"\n⏭️ **Keyingi usul:** {session.next_delivery_method}"
-        if session.server_code_timeout:
-            info += f"\n⏳ **Keyingi qayta yuborish oynasi:** {session.server_code_timeout} soniya"
+        next_method = getattr(session, "next_delivery_method", None)
+        if next_method:
+            info += f"\n⏭️ **Keyingi usul:** {next_method}"
+        server_timeout = getattr(session, "server_code_timeout", 0)
+        if server_timeout:
+            info += f"\n⏳ **Keyingi qayta yuborish oynasi:** {server_timeout} soniya"
         return self.settings.messages["code_sent"].format(delivery_info=info)
 
     def _is_admin(self, user_id: int) -> bool:
