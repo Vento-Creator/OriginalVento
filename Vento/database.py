@@ -1029,15 +1029,15 @@ async def add_admin(admin_id: int, joined_date: int, admin_date: int):
     async with get_db_connection() as db:
         await db.execute('''
             INSERT INTO admins (admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users)
-            VALUES (?, ?, ?, TRUE, TRUE, TRUE, TRUE, TRUE)
+            VALUES (?, ?, ?, 1, 1, 1, 1, 1)
             ON CONFLICT (admin_id) DO UPDATE SET
                 joined_date = EXCLUDED.joined_date,
                 admin_date = EXCLUDED.admin_date,
-                can_add_admin = TRUE,
-                can_ban = TRUE,
-                can_clear_db = TRUE,
-                can_broadcast = TRUE,
-                can_manage_users = TRUE
+                can_add_admin = 1,
+                can_ban = 1,
+                can_clear_db = 1,
+                can_broadcast = 1,
+                can_manage_users = 1
         ''', (admin_id, joined_date, admin_date))
         await db.commit()
 
