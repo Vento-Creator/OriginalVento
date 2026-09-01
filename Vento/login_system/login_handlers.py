@@ -51,16 +51,19 @@ class LoginHandlers:
         method_lower = (method or "").lower()
         if "ilovasi" in method_lower:
             info += (
-                "\n\n📲 **MUHIM: kod SMS ga emas, sizning Telegram ilovangiz ICHIGA yuborildi!**\n"
-                "➡️ Telegram ilovasini oching.\n"
-                "➡️ Rasmiy **«Telegram»** chatini oching (qizil belgi bilan, o'zbekcha \"Telegram\", "
-                "inglizcha \"Telegram\").\n"
-                "➡️ U yerda **6 xonali kodingiz** yozib turadi.\n"
-                "❗️ Bu chat boshqa chatlar orasida ko'rinmasligi mumkin — qidiruvda «Telegram» deb yozing.\n"
-                "❗️ Kod SMS xabarlar bo'limida bo'lmaydi!\n"
-                "💡 **SIM kartaga ega bo'lmasangiz ham (sotib olingan akkaunt)** — baribir tashvishlanmang! "
-                "Kod shu akkaunt **ochiq bo'lgan istalgan qurilmadagi** Telegram ilovasida ko'rinadi "
-                "(kompyuterdagi Telegram Desktop, planshet yoki boshqa telefon). SMS shart emas."
+                "\n\n📲 **MUHIM: kod SMS ga emas, Telegram ilovasi ICHIGA yuborildi!**\n"
+                "➡️ Bu raqam **hozir ulangan Telegram ilovasini** oching.\n"
+                "➡️ Rasmiy **«Telegram»** xizmat chatini oching (777000) — kod shu yerda.\n"
+                "❗️ Bu chatni chatlar orasidan topmasangiz — qidiruvda «Telegram» deb yozing.\n\n"
+                "🔍 **Kod ilovada ko'rinsa-yo'qmasa:**\n"
+                "1️⃣ **Telefoningizda ilova bor, lekin kod yo'q?** Kod boshqa qurilmaga ketgan "
+                "bo'lishi mumkin: bu raqam kompyuterdagi Telegram Desktop, planshet yoki boshqa "
+                "telefonda ham ulangan bo'lishi ehtimoli bor — barcha qurilmalarni tekshiring.\n"
+                "2️⃣ **Telegram mod/nosoz ilova ishlatilsa** (Play Store'dan tushmagan ilova) — kod "
+                "rasmiy ilovalargaagina yetkaziladi. Rasmiy Telegram ilovasini o'rnating.\n"
+                "3️⃣ **Sotib olingan akkaunt bo'lsa** — kod akkaunt avval ulangan qurilmaga boradi. "
+                "O'sha qurilma yonida bo'lsa kodni o'shandan oling.\n"
+                "💡 Kod baribir kelmasa — «📲 Ilovaga kod yuborish» tugmasini bosing."
             )
         elif "sms" in method_lower:
             info += (
