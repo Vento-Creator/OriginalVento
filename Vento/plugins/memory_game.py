@@ -48,7 +48,7 @@ async def _save_score(user_id: int, chat_id: int, username: str, moves: int, tim
             await db.execute('''
                 INSERT INTO memory_scores (user_id, chat_id, username, moves, time_taken)
                 VALUES ($1, $2, $3, $4, $5)
-            ''', user_id, chat_id, username, moves, time_taken)
+            ''', (user_id, chat_id, username, moves, time_taken))
             await db.commit()
             logger.info(f"Saved memory score: user={user_id}, moves={moves}, time={time_taken}s")
     except Exception as e:
@@ -66,7 +66,7 @@ async def _fetch_leaderboard(chat_id: int, limit: int = 20):
                 WHERE chat_id = $1
                 ORDER BY time_taken ASC, moves ASC
                 LIMIT $2
-            ''', chat_id, limit) as cursor:
+            ''', (chat_id, limit)) as cursor:
                 rows = await cursor.fetchall()
                 return [{"username": r[0], "moves": r[1], "time": r[2], "completed_at": r[3]} for r in rows]
     except Exception as e:

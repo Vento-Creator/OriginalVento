@@ -364,7 +364,7 @@ async def add_or_update_user(user_id, expiry_date, username=None, first_name=Non
             INSERT INTO users (user_id, expiry_date, warned, username, first_name, is_active)
             VALUES ($1, $2, FALSE, $3, $4, 1)
             ON CONFLICT(user_id) DO UPDATE SET expiry_date = $5, warned = FALSE, username = $6, first_name = $7, is_active = 1
-        ''', user_id, expiry_date, username, first_name, expiry_date, username, first_name)
+        ''', (user_id, expiry_date, username, first_name, expiry_date, username, first_name))
         await db.commit()
 
 async def set_user_active_status(user_id: int, is_active: bool) -> bool:
@@ -493,7 +493,7 @@ async def search_groups(query: str, limit: int = 20):
                WHERE group_title ILIKE $1
                ORDER BY date_scraped DESC 
                LIMIT $2""",
-            search_pattern, limit
+            (search_pattern, limit)
         ) as cursor:
             rows = await cursor.fetchall()
             return [{"group_id": r[0], "group_title": r[1], "date_scraped": r[2], "owner_id": r[3]} for r in rows]
@@ -1029,7 +1029,7 @@ async def add_admin(admin_id: int, joined_date: int, admin_date: int):
     async with get_db_connection() as db:
         await db.execute('''
             INSERT INTO admins (admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users)
-            VALUES ($1, $2, $3, TRUE, TRUE, TRUE, TRUE, TRUE)
+            VALUES (?, ?, ?, TRUE, TRUE, TRUE, TRUE, TRUE)
             ON CONFLICT (admin_id) DO UPDATE SET
                 joined_date = EXCLUDED.joined_date,
                 admin_date = EXCLUDED.admin_date,
@@ -1038,7 +1038,7 @@ async def add_admin(admin_id: int, joined_date: int, admin_date: int):
                 can_clear_db = TRUE,
                 can_broadcast = TRUE,
                 can_manage_users = TRUE
-        ''', admin_id, joined_date, admin_date)
+        ''', (admin_id, joined_date, admin_date))
         await db.commit()
 
 async def remove_admin(admin_id: int):
