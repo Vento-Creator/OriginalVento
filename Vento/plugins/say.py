@@ -1,10 +1,61 @@
 from pyrogram import Client, filters
+from pyrogram.enums import ChatMemberStatus
 from pyrogram.types import Message
+from config import is_admin
 
-@Client.on_message(filters.command("say") & filters.group)
+import time
+
+# "Say" buyrug'i guruh adminligini qayta tekshirmaslik uchun kesh
+# {chat_id: {user_id: (is_admin_flag, timestamp)}}
+_group_admin_cache = {}
+_GROUP_ADMIN_CACHE_TTL = 60  # soniya
+
+
+async def say_admin_filter(client: Client, _, message: Message):
+    """Faqat bot adminlari yoki guruh adminlariga ruxsat beradi."""
+    if not message.from_user:
+        return False
+
+    # 1) Bot adminlari (config/bazadagi adminlar)
+    if is_admin(message.from_user.id):
+        return True
+
+    # 2) Anonim guruh adminlari (Telegram nomidan yozadi)
+    if message.from_user.id == 1087968824:  # GroupAnonymousBot
+        return True
+    if message.sender_chat and message.sender_chat.id == message.chat.id:
+        return True
+
+    # 3) Guruh adminlari (owner yoki administrator) — kesh bilan
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    now = time.time()
+
+    chat_cache = _group_admin_cache.setdefault(chat_id, {})
+    cached = chat_cache.get(user_id)
+    if cached:
+        is_grp_admin, ts = cached
+        if now - ts < _GROUP_ADMIN_CACHE_TTL:
+            return is_grp_admin
+
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        result = member.status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR)
+    except Exception:
+        result = False
+
+    chat_cache[user_id] = (result, now)
+    return result
+
+
+say_admin_only = filters.create(say_admin_filter)
+
+
+
+@Client.on_message(filters.command("say") & filters.group & say_admin_only)
 async def say_command_handler(client: Client, message: Message):
-    """Handle the /say command in groups to speak as the bot."""
-    
+    """Handle the /say command in groups to speak as the bot (admins only)."""
+
     if len(message.command) < 2:
         # Command used without arguments
         return
