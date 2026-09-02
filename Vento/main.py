@@ -142,7 +142,7 @@ async def register_bot_commands():
         payload = {
             "menu_button": {
                 "type": "web_app",
-                "text": "📱 Mini App",
+                "text": "Mini App",
                 "web_app": {"url": MINI_APP_URL}
             }
         }
