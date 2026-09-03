@@ -113,6 +113,11 @@ DEBUG_ADMIN_IDS += [
 ]
 DEBUG_MODE = _debug_flag("DEBUG_MODE")
 
+# /say komandasi (guruhlarda bot nomidan yozish) — xavfsizlik uchun o'chirib/yoqish mumkin.
+# Default: O'CHIRILGAN. Yoqish uchun config.json ga "SAY_COMMAND_ENABLED": "true"
+# yoki env ga SAY_COMMAND_ENABLED=true qo'ying.
+SAY_COMMAND_ENABLED = _debug_flag("SAY_COMMAND_ENABLED", False)
+
 async def load_admin_ids_from_db():
     """Bazadan admin ID larini yuklash"""
     global ADMIN_IDS

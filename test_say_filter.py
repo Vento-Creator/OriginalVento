@@ -1,12 +1,16 @@
 # Test: say_admin_filter mantiqini tekshirish (real pyrogram bilan)
 import sys
+import os
 import types
 import asyncio
 
 # config modulini stub qilib qo'yamiz (real config.json kerak emas)
+# Rejim: SAY_STATE env orqali boshqariladi ("off"/"on")
+SAY_STATE = os.environ.get("SAY_STATE", "off").lower()
 fake_config = types.ModuleType("config")
 fake_config.ADMIN_IDS = [111, 222]  # bot adminlar
 fake_config.DEBUG_MODE = False
+fake_config.SAY_COMMAND_ENABLED = (SAY_STATE == "on")
 fake_config.is_admin = lambda uid: uid in fake_config.ADMIN_IDS
 sys.modules["config"] = fake_config
 
@@ -109,13 +113,25 @@ async def main():
     ok = calls["n"] == 1
     print(f"{'PASS' if ok else 'FAIL'} | kesh: 2 marta tekshiruvda 1 ta API so'rovi (calls={calls['n']})")
 
-    # 10) Registratsiya: pyrogram class-decorator handler'ni func.handlers ga saqlaydi
-    handlers = getattr(say.say_command_handler, "handlers", [])
-    print(f"say handler ro'yxatdan o'tgan: {len(handlers)} ta")
-    if handlers:
-        mh, _grp = handlers[0]
-        print(f"handler filters: {mh.filters}")
-        ok_reg = "say_admin_only" in str(mh.filters)
-        print(f"{'PASS' if ok_reg else 'FAIL'} | handler filterida say_admin_only bor")
+    # 10) Registratsiya rejimi: SAY_COMMAND_ENABLED ga qarab
+    if SAY_STATE == "off":
+        has_handler = hasattr(say, "say_command_handler")
+        ok_reg = not has_handler
+        print(f"{'PASS' if ok_reg else 'FAIL'} | OFF rejim: say_command_handler mavjud EMAS (registratsiya yo'q)")
+    else:
+        handlers = getattr(getattr(say, "say_command_handler", None), "handlers", [])
+        ok_reg = len(handlers) == 1
+        print(f"{'PASS' if ok_reg else 'FAIL'} | ON rejim: say handler ro'yxatdan o'tgan ({len(handlers)} ta)")
+        if handlers:
+            mh, _grp = handlers[0]
+            parts = []
+            def walk(x):
+                if hasattr(x, "base"):
+                    walk(x.base); walk(x.other)
+                else:
+                    parts.append(x)
+            walk(mh.filters)
+            ok_admin_filter = any(p is say.say_admin_only for p in parts)
+            print(f"{'PASS' if ok_admin_filter else 'FAIL'} | handler filterida say_admin_only bor")
 
 asyncio.run(main())
