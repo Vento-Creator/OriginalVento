@@ -10,24 +10,34 @@ fake_config.ADMIN_IDS = [1, 20, 21]     # 20, 21 — adminlar
 fake_config.is_admin = lambda uid: uid in fake_config.ADMIN_IDS
 sys.modules["config"] = fake_config
 
-# --- database stub (bot_settings xotirada) ---
+# --- database stub (bot_settings + user_feature_flags xotirada) ---
 bot_settings_store = {}
+user_flags_store = {}   # (user_id, feature) -> "1"/"0"
 
 class FakeDB:
     async def fetchrow(self, query, *args):
-        key = args[0] if args else None
-        if key in bot_settings_store:
-            return {"key": key, "value": bot_settings_store[key]}
+        if "user_feature_flags" in query:
+            v = user_flags_store.get((args[0], args[1]))
+            return {"enabled": int(v)} if v is not None else None
+        if "bot_settings" in query:
+            key = args[0] if args else None
+            if key in bot_settings_store:
+                return {"key": key, "value": bot_settings_store[key]}
+            return None
         return None
 
     async def fetch(self, query, *args):
         if "user_feature_flags" in query:
-            return []
+            uid = args[0] if args else None
+            return [{"feature": f, "enabled": int(v)}
+                    for (u, f), v in user_flags_store.items() if u == uid]
         return [{"key": k, "value": v} for k, v in bot_settings_store.items()
                 if k.startswith("feature_manager_")]
 
     async def execute(self, query, *args):
-        if len(args) >= 2:
+        if "user_feature_flags" in query:
+            user_flags_store[(args[0], args[1])] = str(args[2])
+        elif "bot_settings" in query and len(args) >= 2:
             bot_settings_store[args[0]] = args[1]
 
 class FakeConn:
@@ -54,6 +64,15 @@ class FakeMsg:
         self.replies = []
     async def reply_text(self, text, **kw):
         self.replies.append(text)
+
+class FakeCQ:
+    def __init__(self, uid):
+        self.from_user = types.SimpleNamespace(id=uid)
+        self.answers = []
+    async def answer(self, text=None, **kw):
+        self.answers.append(text)
+    async def edit_text(self, *a, **kw):
+        pass
 
 async def main():
     import importlib
@@ -82,28 +101,39 @@ async def main():
     await fs.global_features_command(None, m)
     check("no-perm admin /gfeat denied", any("ruxsat yo'q" in r for r in m.replies))
 
-    # 5) Ruxsatnomali admin /gfeat -> panel ochiladi
+    # 5) Ruxsatnomali admin /gfeat (argsiz) -> holat ro'yxati
     m2 = FakeMsg(ADMIN_MGR, "/gfeat")
     await fs.global_features_command(None, m2)
-    check("perm admin /gfeat opens", len(m2.replies) == 1 and "Global" in m2.replies[0])
+    check("perm admin /gfeat list", len(m2.replies) == 1 and "Global" in m2.replies[0])
+
+    # 5b) /gfeat utag off -> global o'chirildi
+    m2b = FakeMsg(ADMIN_MGR, "/gfeat utag off")
+    await fs.global_features_command(None, m2b)
+    check("gfeat utag off", any("HAMMA" in r for r in m2b.replies)
+          and bot_settings_store.get("feature_enabled_utag") == "0")
+
+    # 5c) /gfeat noto'g'ri sintaksis -> usage
+    m2c = FakeMsg(ADMIN_MGR, "/gfeat utag")
+    await fs.global_features_command(None, m2c)
+    check("gfeat usage on bad syntax", any("Foydalanish" in r for r in m2c.replies))
 
     # 6) Admin o'zini /feat qila olmaydi
-    m3 = FakeMsg(ADMIN_MGR, f"/feat {ADMIN_MGR}")
+    m3 = FakeMsg(ADMIN_MGR, f"/feat utag {ADMIN_MGR} off")
     await fs.user_feature_command(None, m3)
     check("admin self-edit denied", any("o'zgartira olmaysiz" in r for r in m3.replies))
 
     # 7) Admin boshqa userga /feat qila oladi
-    m4 = FakeMsg(ADMIN_MGR, f"/feat {PLAIN_USER}")
+    m4 = FakeMsg(ADMIN_MGR, f"/feat utag {PLAIN_USER} off")
     await fs.user_feature_command(None, m4)
     check("admin edits other user", len(m4.replies) == 1 and str(PLAIN_USER) in m4.replies[0])
 
     # 8) Owner o'ziga ham /feat qila oladi (owner mustasno)
-    m5 = FakeMsg(OWNER, f"/feat {OWNER}")
+    m5 = FakeMsg(OWNER, f"/feat utag {OWNER} on")
     await fs.user_feature_command(None, m5)
     check("owner self-edit allowed", len(m5.replies) == 1 and "o'zgartira olmaysiz" not in m5.replies[0])
 
     # 9) Ruxsatnomasiz admin /feat -> ruxsat yo'q
-    m6 = FakeMsg(ADMIN_NOMGR, f"/feat {PLAIN_USER}")
+    m6 = FakeMsg(ADMIN_NOMGR, f"/feat utag {PLAIN_USER} off")
     await fs.user_feature_command(None, m6)
     check("no-perm admin /feat denied", any("ruxsat yo'q" in r for r in m6.replies))
 
@@ -146,15 +176,39 @@ async def main():
     # 13) User callback feat|toggle| endi mavjud emas (self-yoqish o'chirildi)
     check("self-toggle callback removed", not hasattr(fs, "feature_toggle_callback"))
 
-    # 14) Gate bypass: faqat owner; admin flaglarga bo'ysunadi
-    check("gate: owner bypass", await ff.gate_feature(FakeMsg(OWNER, "/utag"), "utag"))
-    check("gate: admin allowed by default", await ff.gate_feature(FakeMsg(ADMIN_MGR, "/utag"), "utag"))
-    await ff.set_global_feature("utag", False)
-    ff._global_flag_cache.clear()
-    check("gate: admin blocked when global off", not await ff.gate_feature(FakeMsg(ADMIN_MGR, "/utag"), "utag"))
-    check("gate: owner still allowed", await ff.gate_feature(FakeMsg(OWNER, "/utag"), "utag"))
+    # 14) Gate bypass: faqat owner; admin flaglarga bo'ysunadi + xabar matnlari
+    # FakeMsg/FakeCQ ni pyrogram turlari o'rniga qo'yamiz (isinstance tekshiruvi uchun)
+    ff.Message = FakeMsg
+    ff.CallbackQuery = FakeCQ
+    ff._flood_state.clear()
     await ff.set_global_feature("utag", True)
     ff._global_flag_cache.clear()
+
+    ev_owner = FakeMsg(OWNER, "/utag")
+    check("gate: owner bypass", await ff.gate_feature(ev_owner, "utag"))
+
+    ev_admin = FakeMsg(ADMIN_MGR, "/utag")
+    check("gate: admin allowed by default", await ff.gate_feature(ev_admin, "utag"))
+
+    await ff.set_global_feature("utag", False)
+    ff._global_flag_cache.clear()
+    ev_admin2 = FakeMsg(ADMIN_MGR, "/utag")
+    check("gate: admin blocked when global off", not await ff.gate_feature(ev_admin2, "utag"))
+    check("gate msg: global text", any("hamma uchun cheklangan" in r for r in ev_admin2.replies))
+    check("gate msg: global contact admin", any("Admin bilan bog'laning" in r for r in ev_admin2.replies))
+    check("gate: owner still allowed", await ff.gate_feature(FakeMsg(OWNER, "/utag"), "utag"))
+
+    await ff.set_global_feature("utag", True)
+    ff._global_flag_cache.clear()
+    # 14b) Shaxsiy cheklov xabari
+    await ff.set_user_feature(ADMIN_MGR, "utag", False)
+    ff._user_flag_cache.clear()
+    ev_admin3 = FakeMsg(ADMIN_MGR, "/utag")
+    check("gate: blocked by user flag", not await ff.gate_feature(ev_admin3, "utag"))
+    check("gate msg: personal text", any("siz uchun cheklangan" in r for r in ev_admin3.replies))
+    check("gate msg: personal contact admin", any("Admin bilan bog'laning" in r for r in ev_admin3.replies))
+    await ff.set_user_feature(ADMIN_MGR, "utag", True)
+    ff._user_flag_cache.clear()
 
     failed = [n for n, ok in results if not ok]
     for n, ok in results:

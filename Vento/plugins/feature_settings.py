@@ -124,15 +124,58 @@ def _self_edit_denied(actor_id: int, target_id: int) -> bool:
 
 # ------------------------- Admin: global UI -------------------------
 
+_GFEAT_USAGE_TEXT = (
+    "ℹ️ **Foydalanish:** `/gfeat <funksiya> <on|off>`\n\n"
+    "**Funksiyalar:** `utag`, `scraper`, `massdm`, `chat`, `memory`\n\n"
+    "**Misollar:**\n"
+    "• `/gfeat utag off` — Utag'ni HAMMA uchun o'chiradi\n"
+    "• `/gfeat utag on` — Utag'ni hamma uchun qayta yoqadi\n"
+    "• `/gfeat massdm on`\n\n"
+    "Bitta foydalanuvchi uchun: `/feat <funksiya> <user_id> <on|off>`"
+)
+
+_FEAT_USAGE_TEXT = (
+    "ℹ️ **Foydalanish:** `/feat <funksiya> <user_id> <on|off>`\n\n"
+    "**Funksiyalar:** `utag`, `scraper`, `massdm`, `chat`, `memory`\n\n"
+    "**Misollar:**\n"
+    "• `/feat utag 123456789 off` — shu user uchun Utag'ni o'chiradi\n"
+    "• `/feat utag 123456789 on` — qayta yoqadi\n"
+    "• `/feat massdm 123456789 off`\n\n"
+    "Hamma uchun (global): `/gfeat <funksiya> <on|off>`"
+)
+
+
+def _status_list_text(flags: dict, title: str) -> str:
+    lines = [f"{_status_emoji(flags.get(k, True))} {name}" for k, name in FEATURES.items()]
+    return f"{title}\n\n" + "\n".join(lines)
+
+
 @Client.on_message(filters.private & filters.command(["gfeat", "globalfeatures"]))
 async def global_features_command(client: Client, message: Message):
-    """/gfeat — global funksiyalar paneli (ruxsatnoma kerak)."""
+    """/gfeat <funksiya> <on|off> — funksiyani hamma uchun yoq/o'chir (ruxsatnoma kerak)."""
     if not is_admin(message.from_user.id):
         return
     if not await _check_manager(message):
         return
-    flags = await get_global_features()
-    await message.reply_text(_GLOBAL_MENU_TEXT, reply_markup=_global_keyboard(flags))
+
+    parts = (message.text or "").split()
+    if len(parts) == 1:
+        flags = await get_global_features()
+        await message.reply_text(_status_list_text(flags, "🌍 **Global funksiyalar** (hamma uchun):"))
+        return
+
+    if len(parts) != 3 or parts[1] not in FEATURES or parts[2] not in ("on", "off"):
+        await message.reply_text(_GFEAT_USAGE_TEXT)
+        return
+
+    key, enable = parts[1], parts[2] == "on"
+    action = "yoqildi" if enable else "o'chirildi"
+    if await set_global_feature(key, enable):
+        await message.reply_text(
+            f"✅ {FEATURES[key]} — **HAMMA uchun** {action} (global)."
+        )
+    else:
+        await message.reply_text("⚠️ Saqlashda xatolik, qayta urinib ko'ring.")
 
 
 @Client.on_callback_query(filters.regex(r"^feat\|global\|(\w+)$"))
@@ -194,35 +237,39 @@ def _user_panel_keyboard(target_uid: int, flags: dict) -> InlineKeyboardMarkup:
 
 @Client.on_message(filters.private & filters.command("feat"))
 async def user_feature_command(client: Client, message: Message):
-    """/feat <user_id> — bitta foydalanuvchi funksiyalari (ruxsatnoma kerak)."""
+    """/feat <funksiya> <user_id> <on|off> — bitta user uchun yoq/o'chir (ruxsatnoma kerak)."""
     if not is_admin(message.from_user.id):
         return
     if not await _check_manager(message):
         return
 
     parts = (message.text or "").split()
-    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
-        await message.reply_text(
-            "ℹ️ **Foydalanish:** `/feat <user_id>`\n\n"
-            "Masalan: `/feat 123456789` — shu user uchun funksiyalar panelini ochadi.\n"
-            "(Global boshqarish uchun: `/gfeat`)"
-        )
+    if len(parts) == 1:
+        await message.reply_text(_FEAT_USAGE_TEXT)
         return
 
-    target_uid = int(parts[1])
+    if len(parts) != 4 or parts[1] not in FEATURES \
+            or not parts[2].lstrip("-").isdigit() or parts[3] not in ("on", "off"):
+        await message.reply_text(_FEAT_USAGE_TEXT)
+        return
 
-    if _self_edit_denied(message.from_user.id, target_uid):
+    key, target_uid, enable = parts[1], int(parts[2]), parts[3] == "on"
+    actor_id = message.from_user.id
+
+    if _self_edit_denied(actor_id, target_uid):
         await message.reply_text(
             "⛔️ O'z funksiyalaringizni o'zingiz o'zgartira olmaysiz.\n"
             "Adminlarning funksiyalarini **owner** boshqaradi."
         )
         return
 
-    flags = await get_user_features(target_uid)
-    await message.reply_text(
-        _USER_PANEL_TEXT.format(user_id=target_uid),
-        reply_markup=_user_panel_keyboard(target_uid, flags),
-    )
+    if await set_user_feature(target_uid, key, enable):
+        action = "yoqildi" if enable else "o'chirildi"
+        await message.reply_text(
+            f"✅ {FEATURES[key]} — user `{target_uid}` uchun **{action}**."
+        )
+    else:
+        await message.reply_text("⚠️ Saqlashda xatolik, qayta urinib ko'ring.")
 
 
 @Client.on_callback_query(filters.regex(r"^feat\|user\|(-?\d+)\|(\w+)$"))

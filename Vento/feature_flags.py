@@ -361,13 +361,13 @@ async def gate_feature(event, feature: str) -> bool:
 
     if reason == "global":
         text = (
-            f"🚫 <b>{FEATURES[feature]}</b> funksiyasi hozircha "
-            f"administrator tomonidan cheklangan."
+            f"🚫 <b>{FEATURES[feature]}</b> funksiyasi hamma uchun cheklangan.\n"
+            f"Admin bilan bog'laning."
         )
     else:
         text = (
-            f"🚫 <b>{FEATURES[feature]}</b> funksiyasi siz uchun o'chirilgan.\n"
-            f"⚙️ \"Funksiyalar\" menyusidan qayta yoqishingiz mumkin."
+            f"🚫 <b>{FEATURES[feature]}</b> funksiyasi siz uchun cheklangan.\n"
+            f"Admin bilan bog'laning."
         )
 
     try:
