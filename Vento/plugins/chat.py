@@ -45,8 +45,11 @@ async def format_timestamp(ts: int) -> str:
 @Client.on_callback_query(filters.regex("^menu_chat$"))
 async def menu_chat_callback(client: Client, cq: CallbackQuery):
     """Chat menyusi callback"""
+    from feature_flags import gate_feature
     uid = cq.from_user.id
-    
+    if not await gate_feature(cq, "chat"):
+        return
+
     if not await has_accepted_chat_terms(uid):
         await cq.message.edit_text(
             "📜 **Chat shartlari va qoidalari**\n\n"

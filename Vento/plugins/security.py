@@ -19,7 +19,7 @@ VALID_CALLBACK_PATTERNS = [
     "approve_", "reject_", "user_", "stop_utag_", "contact_", "complaint_",
     "resend_code", "code_help", "close_help",
     "complaints_", "chat_", "group_search", "guide_", "owner_", "broadcast_retry",
-    "bc_", "language", "account_link", "mem_"
+    "bc_", "language", "account_link", "mem_", "feat|"
 ]
 
 MAX_BUTTON_ROWS = 10

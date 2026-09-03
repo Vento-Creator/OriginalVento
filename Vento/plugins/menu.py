@@ -40,7 +40,7 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
             [KeyboardButton("🔍 Scraper"),   KeyboardButton("🗂 Bazalar")],
             [KeyboardButton("📨 Mass DM"),   KeyboardButton("🏷 Utag")],
             [KeyboardButton("💬 Chatlar"),   KeyboardButton("🔍 Guruh qidirish")],
-            [KeyboardButton("🌐 Til")],
+            [KeyboardButton("🌐 Til"),       KeyboardButton("⚙️ Funksiyalar")],
         ]
         if is_free and not has_paid_sub and not adm:
             rows.append([KeyboardButton("⭐️ Obuna sotib olish"), KeyboardButton("👤 Akkaunt")])
@@ -79,6 +79,7 @@ _MENU_TEXTS = {
     "⭐️ Obuna", "⭐️ Obuna sotib olish", "⭐️ Obuna haqida",
     "👤 Akkaunt", "🛠 Admin Panel", "📱 Akkaunt ulash", "🔙 Bosh menyu",
     "📣 Yangiliklar", "📞 Bog'lanish", "💬 Chatlar", "🌐 Til",
+    "⚙️ Funksiyalar",
 }
 
 @Client.on_message(filters.private & filters.text, group=-10)

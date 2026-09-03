@@ -341,6 +341,9 @@ utag_handlers = UtagHandlers(utag_service)
 @handle_errors("utag", "user_id", auto_retry=False)
 async def utag_start_command(client: Client, message: Message):
     """Handle /utag command"""
+    from feature_flags import gate_feature
+    if not await gate_feature(message, "utag"):
+        return
     await utag_handlers.handle_utag_start(client, message)
 
 
@@ -355,6 +358,9 @@ async def utag_message_handler(client: Client, message: Message):
 @handle_errors("utag", "user_id", auto_retry=False)
 async def utag_start_callback(client: Client, callback_query: CallbackQuery):
     """Handle UTAG start"""
+    from feature_flags import gate_feature
+    if not await gate_feature(callback_query, "utag"):
+        return
     await utag_handlers.handle_utag_start_callback(client, callback_query)
 
 

@@ -120,6 +120,9 @@ def _check_complete(sid: str):
 
 @Client.on_message(filters.command("memory") & filters.group)
 async def memory_cmd(client: Client, msg: Message):
+    from feature_flags import gate_feature
+    if not await gate_feature(msg, "memory"):
+        return
     uid = msg.from_user.id
     cid = msg.chat.id
     sid = _sid(cid, uid)

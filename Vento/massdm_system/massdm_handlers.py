@@ -526,6 +526,9 @@ massdm_handlers = MassDMHandlers(massdm_service)
 @handle_errors("massdm", "user_id", auto_retry=False)
 async def massdm_start_command(client: Client, message: Message):
     """Handle /massdm command"""
+    from feature_flags import gate_feature
+    if not await gate_feature(message, "massdm"):
+        return
     await massdm_handlers.handle_start_massdm(client, message)
 
 
@@ -569,6 +572,9 @@ async def massdm_cancel_callback(client: Client, callback_query: CallbackQuery):
 @handle_errors("massdm", "user_id", auto_retry=False)
 async def massdm_start_callback(client: Client, callback_query: CallbackQuery):
     """Handle MassDM start via callback query"""
+    from feature_flags import gate_feature
+    if not await gate_feature(callback_query, "massdm"):
+        return
     await massdm_handlers.handle_start_massdm_callback(client, callback_query)
 
 

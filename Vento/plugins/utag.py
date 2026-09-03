@@ -458,7 +458,11 @@ async def custom_utag_command_handler(client: Client, message: Message):
 
         cmd = cmd[:-4]
 
-    
+    # Feature flag: faqat boshlash (atag) urinishi tekshiriladi
+    if cmd == atag_cmd:
+        from feature_flags import gate_feature
+        if not await gate_feature(message, "utag"):
+            raise ContinuePropagation
 
     parts = text[1:].split(maxsplit=1)
 

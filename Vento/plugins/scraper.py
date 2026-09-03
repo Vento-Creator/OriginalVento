@@ -258,7 +258,10 @@ async def execute_msg_scrape(user_id: int, target: int, msg_limit: int, status_m
 
 @Client.on_callback_query(filters.regex("^menu_scraper$"))
 async def scraper_start(client: Client, callback_query: CallbackQuery):
+    from feature_flags import gate_feature
     user_id = callback_query.from_user.id
+    if not await gate_feature(callback_query, "scraper"):
+        return
     
     try:
         del_msg = await callback_query.message.reply_text("⏳", reply_markup=ReplyKeyboardRemove())
@@ -804,6 +807,9 @@ async def scrape_girl_callback(client: Client, callback_query: CallbackQuery):
 
 @Client.on_message(filters.command("add_to_baza"))
 async def add_to_baza_handler(client: Client, message: Message):
+    from feature_flags import gate_feature
+    if not await gate_feature(message, "scraper"):
+        return
     args = message.text.split()
     if len(args) != 3:
         await message.reply_text("Noto'g'ri format! Foydalanish: `/add_to_baza [Baza_ID] [user_id_yoki_username]`")
