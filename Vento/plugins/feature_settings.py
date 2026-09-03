@@ -2,6 +2,7 @@
 Funksiyalar menyusi:
 - Foydalanuvchi: "⚙️ Funksiyalar" tugmasi → o'z funksiyalarini yoq/o'chir.
 - Admin: /gfeat buyrug'i → global (hamma uchun) yoq/o'chir.
+- Admin: /feat <user_id> → bitta foydalanuvchi uchun yoq/o'chir.
 """
 
 import logging
@@ -133,6 +134,87 @@ async def global_feature_refresh_callback(client: Client, cq: CallbackQuery):
     flags = await get_global_features()
     await cq.message.edit_text(_GLOBAL_MENU_TEXT, reply_markup=_global_keyboard(flags))
     await cq.answer("🔄 Yangilandi")
+
+# ------------------------- Admin: bitta user uchun -------------------------
+
+_USER_PANEL_TEXT = (
+    "👤 **Foydalanuvchi funksiyalari** (admin)\n\n"
+    "ID: `{user_id}`\n\n"
+    "Bu holat FAQAT shu foydalanuvchiga ta'sir qiladi "
+    "(boshqalarga yo'q)."
+)
+
+
+def _user_panel_keyboard(target_uid: int, flags: dict) -> InlineKeyboardMarkup:
+    rows = []
+    for key, name in FEATURES.items():
+        rows.append([InlineKeyboardButton(
+            f"{name} — {_status_emoji(flags.get(key, True))}",
+            callback_data=f"feat|user|{target_uid}|{key}",
+        )])
+    rows.append([InlineKeyboardButton("🔄 Yangilash", callback_data=f"feat|user|{target_uid}|_refresh")])
+    return InlineKeyboardMarkup(rows)
+
+
+@Client.on_message(filters.private & filters.command("feat"))
+async def user_feature_command(client: Client, message: Message):
+    """/feat <user_id> — bitta foydalanuvchi funksiyalari (faqat adminlar)."""
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
+        await message.reply_text(
+            "ℹ️ **Foydalanish:** `/feat <user_id>`\n\n"
+            "Masalan: `/feat 123456789` — shu user uchun funksiyalar panelini ochadi.\n"
+            "(Global boshqarish uchun: `/gfeat`)"
+        )
+        return
+
+    target_uid = int(parts[1])
+    flags = await get_user_features(target_uid)
+    await message.reply_text(
+        _USER_PANEL_TEXT.format(user_id=target_uid),
+        reply_markup=_user_panel_keyboard(target_uid, flags),
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^feat\|user\|(-?\d+)\|(\w+)$"))
+async def user_feature_toggle_callback(client: Client, cq: CallbackQuery):
+    if not is_admin(cq.from_user.id):
+        await cq.answer("⛔️ Faqat adminlar uchun", show_alert=True)
+        return
+
+    target_uid = int(cq.matches[0].group(1))
+    key = cq.matches[0].group(2)
+
+    if key == "_refresh":
+        flags = await get_user_features(target_uid)
+        await cq.message.edit_text(
+            _USER_PANEL_TEXT.format(user_id=target_uid),
+            reply_markup=_user_panel_keyboard(target_uid, flags),
+        )
+        await cq.answer("🔄 Yangilandi")
+        return
+
+    if key not in FEATURES:
+        await cq.answer("⚠️ Noma'lum funksiya", show_alert=True)
+        return
+
+    flags = await get_user_features(target_uid)
+    new_value = not flags.get(key, True)
+    if await set_user_feature(target_uid, key, new_value):
+        flags[key] = new_value
+        await cq.message.edit_text(
+            _USER_PANEL_TEXT.format(user_id=target_uid),
+            reply_markup=_user_panel_keyboard(target_uid, flags),
+        )
+        await cq.answer(
+            f"User {target_uid} — {FEATURES[key]}: "
+            f"{'yoqildi' if new_value else 'ochirildi'}"
+        )
+    else:
+        await cq.answer("⚠️ Saqlashda xatolik, qayta urinib ko'ring", show_alert=True)
 
 # gate_feature shu yerdan ham eksport qilinadi (qulaylik uchun)
 __all__ = ["gate_feature", "FEATURES_BTN"]
