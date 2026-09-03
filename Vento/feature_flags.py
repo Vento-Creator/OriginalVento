@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Dict, Optional, Tuple
 
-from config import is_admin
+from config import is_admin, SUPER_ADMIN_ID
 from database import get_db_connection
 from pyrogram.types import CallbackQuery, Message
 
@@ -42,9 +42,11 @@ MUTE_SECONDS = 1800           # limit oshsa — yarim soatga jim
 
 USER_FLAG_CACHE_TTL = 60.0
 GLOBAL_FLAG_CACHE_TTL = 30.0
+MANAGER_CACHE_TTL = 30.0
 
 _user_flag_cache: Dict[Tuple[int, str], Tuple[bool, float]] = {}
 _global_flag_cache: Dict[str, Tuple[bool, float]] = {}
+_manager_cache: Dict[int, Tuple[bool, float]] = {}
 _flood_state: Dict[int, dict] = {}
 _tables_ready = False
 
@@ -216,6 +218,79 @@ async def get_global_features() -> Dict[str, bool]:
             flags[feature] = str(row["value"]) == "1"
     return flags
 
+# ------------------------- Boshqaruv ruxsatnomasi -------------------------
+
+def is_owner(user_id: int) -> bool:
+    """Owner (SUPER_ADMIN_ID) — hamma narsani boshqara oladi, o'z flaglaridan tashqari."""
+    return user_id == SUPER_ADMIN_ID
+
+
+def _manager_key(user_id: int) -> str:
+    return f"feature_manager_{user_id}"
+
+
+async def can_manage_features(user_id: int) -> bool:
+    """Funksiyalarni boshqarish ruxsatnomasi: owner yoki owner bergan admin."""
+    if is_owner(user_id):
+        return True
+
+    now = time.time()
+    cached = _manager_cache.get(user_id)
+    if cached and now - cached[1] < MANAGER_CACHE_TTL:
+        return cached[0]
+
+    try:
+        await _ensure_tables()
+        async with get_db_connection() as db:
+            row = await db.fetchrow(
+                "SELECT value FROM bot_settings WHERE key = $1",
+                _manager_key(user_id),
+            )
+    except Exception as e:
+        logger.error(f"feature_flags: manager ruxsat o'qilmadi ({user_id}): {e}")
+        return False  # fail-closed — ruxsatsizlar boshqarmasin
+
+    allowed = row is not None and str(row["value"]) == "1"
+    _manager_cache[user_id] = (allowed, now)
+    return allowed
+
+
+async def set_feature_manager(user_id: int, allowed: bool) -> bool:
+    """Owner admin'ga funksiyalarni boshqarish ruxsatnomasini beradi/oladi."""
+    try:
+        await _ensure_tables()
+        async with get_db_connection() as db:
+            await db.execute('''
+                INSERT INTO bot_settings (key, value) VALUES ($1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = $2
+            ''', _manager_key(user_id), "1" if allowed else "0")
+    except Exception as e:
+        logger.error(f"feature_flags: manager ruxsat yozilmadi ({user_id}): {e}")
+        return False
+    _manager_cache.pop(user_id, None)
+    return True
+
+
+async def get_feature_managers() -> Dict[int, bool]:
+    """Ruxsatnoma bergan adminlar ro'yxati."""
+    result: Dict[int, bool] = {}
+    try:
+        await _ensure_tables()
+        async with get_db_connection() as db:
+            rows = await db.fetch(
+                "SELECT key, value FROM bot_settings WHERE key LIKE 'feature_manager_%'"
+            )
+    except Exception as e:
+        logger.error(f"feature_flags: managerlar o'qilmadi: {e}")
+        return result
+    for row in rows:
+        try:
+            uid = int(str(row["key"]).replace("feature_manager_", "", 1))
+            result[uid] = str(row["value"]) == "1"
+        except ValueError:
+            continue
+    return result
+
 # ------------------------- Anti-flood -------------------------
 
 def _flood_check(user_id: int) -> str:
@@ -252,7 +327,9 @@ async def gate_feature(event, feature: str) -> bool:
     """
     Handler'lar boshida chaqiriladi. True = ishga ruxsat, False = cheklangan
     (kerak bo'lsa '🚫 cheklangan' xabari yuboriladi, flood bo'lsa jim).
-    Adminlar cheklovlarni bypass qiladi.
+
+    Faqat OWNER (SUPER_ADMIN_ID) cheklovlardan mustasno — adminlar va oddiy
+    userlarning funksiyalari owner tomonidan boshqariladi (flaglar orqali).
     """
     if feature not in FEATURES:
         return True
@@ -262,7 +339,7 @@ async def gate_feature(event, feature: str) -> bool:
     except Exception:
         return True
 
-    if is_admin(user_id):
+    if is_owner(user_id):
         return True
 
     try:
@@ -309,6 +386,7 @@ def _reset_state_for_tests() -> None:
     """Faqat testlar uchun: barcha xotira holatini tozalaydi."""
     _user_flag_cache.clear()
     _global_flag_cache.clear()
+    _manager_cache.clear()
     _flood_state.clear()
     global _tables_ready
     _tables_ready = False

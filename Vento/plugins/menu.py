@@ -40,8 +40,11 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
             [KeyboardButton("🔍 Scraper"),   KeyboardButton("🗂 Bazalar")],
             [KeyboardButton("📨 Mass DM"),   KeyboardButton("🏷 Utag")],
             [KeyboardButton("💬 Chatlar"),   KeyboardButton("🔍 Guruh qidirish")],
-            [KeyboardButton("🌐 Til"),       KeyboardButton("⚙️ Funksiyalar")],
         ]
+        if adm:
+            rows.append([KeyboardButton("🌐 Til"), KeyboardButton("⚙️ Funksiyalar")])
+        else:
+            rows.append([KeyboardButton("🌐 Til")])
         if is_free and not has_paid_sub and not adm:
             rows.append([KeyboardButton("⭐️ Obuna sotib olish"), KeyboardButton("👤 Akkaunt")])
         else:
