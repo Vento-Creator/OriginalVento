@@ -13,18 +13,18 @@ _GROUP_ADMIN_CACHE_TTL = 60  # soniya
 
 async def say_admin_filter(client: Client, _, message: Message):
     """Faqat bot adminlari yoki guruh adminlariga ruxsat beradi."""
-    if not message.from_user:
-        return False
-
     # 1) Bot adminlari (config/bazadagi adminlar)
-    if is_admin(message.from_user.id):
+    if message.from_user and is_admin(message.from_user.id):
         return True
 
     # 2) Anonim guruh adminlari (Telegram nomidan yozadi)
-    if message.from_user.id == 1087968824:  # GroupAnonymousBot
-        return True
     if message.sender_chat and message.sender_chat.id == message.chat.id:
         return True
+    if message.from_user and message.from_user.id == 1087968824:  # GroupAnonymousBot
+        return True
+
+    if not message.from_user:
+        return False
 
     # 3) Guruh adminlari (owner yoki administrator) — kesh bilan
     chat_id = message.chat.id
