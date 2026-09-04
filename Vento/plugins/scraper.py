@@ -1,6 +1,6 @@
 from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
-from pyrogram.enums import ChatMembersFilter
+from pyrogram.enums import ChatMembersFilter, ChatType, ChatMemberStatus
 from config import user_states, stop_flags, SESSIONS_DIR, API_ID, API_HASH
 from database import add_scraped_group, add_scraped_member, add_scraped_members_batch, generate_unique_group_id, get_group_id_by_title, update_group_date, log_user_action
 from queue_manager import queue_manager
@@ -88,6 +88,56 @@ def make_progress_bar(current, total, width=10):
     return bar, pct
 
 
+SCRAPER_TYPE_ERROR_TEXT = (
+    "❌ **Scraper faqat guruhlarda ishlaydi!**\n\n"
+    "Kanaldan odam yig'ish uchun ushbu kanalda **admin** bo'lishingiz kerak.\n"
+    "A'zolar ro'yxati ochiq bo'lgan guruh havolasini yuboring:\n"
+    "Masalan: `@guruh_username` yoki `https://t.me/guruh_username`"
+)
+
+
+def friendly_scrape_error(e: Exception) -> str:
+    """Texnik Telegram xatolarini tushunarli o'zbekcha xabarga aylantiradi."""
+    s = str(e).upper()
+    if "CHAT_ADMIN_REQUIRED" in s or "ADMIN_REQUIRED" in s:
+        return (
+            "Bu chatda a'zolar ro'yxati yopiq (kanal). "
+            "Kanaldan yig'ish uchun admin bo'lishingiz kerak, yoki a'zolari "
+            "ko'rinadigan ochiq guruh havolasini yuboring."
+        )
+    if "CHANNEL_PRIVATE" in s or "CHAT_FORBIDDEN" in s:
+        return "Guruh/kanal topilmadi yoki kirish uchun ruxsat yo'q."
+    if "USER_NOT_PARTICIPANT" in s:
+        return "Avval ushbu guruh/kanalga a'zo bo'lishingiz kerak."
+    if "FLOOD" in s:
+        return "Telegram vaqtincha chekladi (FloodWait). Biroz kutib qayta urinib ko'ring."
+    if "AUTH_KEY" in s or "SESSION" in s or "UNAUTHORIZED" in s:
+        return f"{e}"
+    return f"Xatolik: {e}"
+
+
+async def check_scrape_target(user_client: Client, chat, user_id: int):
+    """Scraper maqsadi guruh/kanal ekanini va ruxsat borligini tekshiradi.
+
+    Xato bo'lsa foydalanuvchiga ko'rsatiladigan xabar matnini qaytaradi,
+    hammasi joyida bo'lsa None qaytaradi.
+    """
+    if chat.type == ChatType.CHANNEL:
+        # Kanal: a'zolar ro'yxati faqat adminlarga ko'rinadi
+        try:
+            me = await user_client.get_chat_member(chat.id, user_id)
+            if me.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+                return SCRAPER_TYPE_ERROR_TEXT
+        except Exception:
+            return SCRAPER_TYPE_ERROR_TEXT
+    elif chat.type in (ChatType.PRIVATE, ChatType.BOT):
+        return (
+            "❌ Scraper faqat **guruh** yoki **kanal** uchun ishlaydi.\n"
+            "Guruh havolasini yuboring: `@guruh_username`"
+        )
+    return None
+
+
 async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, client: Client):
     """Fast scrape logic - queue callback or direct execution"""
     stop_key = f"scraper_{user_id}_{int(time.time())}"
@@ -161,7 +211,7 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
 
     except Exception as e:
         stop_flags.pop(stop_key, None)
-        await status_msg.edit_text(f"❌ Xatolik: {e}")
+        await status_msg.edit_text(f"❌ {friendly_scrape_error(e)}")
         return False
 
 async def execute_msg_scrape(user_id: int, target: int, msg_limit: int, status_msg: Message, client: Client):
@@ -252,7 +302,7 @@ async def execute_msg_scrape(user_id: int, target: int, msg_limit: int, status_m
 
     except Exception as e:
         stop_flags.pop(stop_key, None)
-        await status_msg.edit_text(f"❌ Xatolik: {e}")
+        await status_msg.edit_text(f"❌ {friendly_scrape_error(e)}")
         return False
 
 
@@ -339,6 +389,17 @@ async def scraper_link_handler(client: Client, message: Message):
                     [InlineKeyboardButton("🔙 Orqaga", callback_data="menu_main")]
                 ])
             )
+        return
+
+    type_error = await check_scrape_target(user_client, chat, user_id)
+    if type_error:
+        user_states.pop(user_id, None)
+        await message.reply_text(
+            type_error,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Bosh menyu", callback_data="menu_main")]
+            ])
+        )
         return
 
     _scraper_targets[user_id] = {"target": chat.id, "stop_key": None}
@@ -595,7 +656,7 @@ async def scrape_msg_count_handler(client: Client, message: Message):
         _scraper_targets.pop(user_id, None)
         stop_flags.pop(stop_key, None)
         active_scraper_processes.pop(stop_key, None)
-        await status_msg.edit_text(f"❌ Xatolik: {e}")
+        await status_msg.edit_text(f"❌ {friendly_scrape_error(e)}")
 
 
 @Client.on_callback_query(filters.regex(r"^scrape_admin_(\d+)$"))
@@ -687,7 +748,7 @@ async def scrape_admin_callback(client: Client, callback_query: CallbackQuery):
     except Exception as e:
         stop_flags.pop(stop_key, None)
         active_scraper_processes.pop(stop_key, None)
-        await msg.edit_text(f"❌ Xatolik: {e}")
+        await msg.edit_text(f"❌ {friendly_scrape_error(e)}")
 
 
 @Client.on_callback_query(filters.regex(r"^scrape_girl_(\d+)$"))
@@ -802,7 +863,7 @@ async def scrape_girl_callback(client: Client, callback_query: CallbackQuery):
     except Exception as e:
         stop_flags.pop(stop_key, None)
         active_scraper_processes.pop(stop_key, None)
-        await msg.edit_text(f"❌ Xatolik: {e}")
+        await msg.edit_text(f"❌ {friendly_scrape_error(e)}")
 
 
 @Client.on_message(filters.command("add_to_baza"))
