@@ -126,7 +126,7 @@ def _self_edit_denied(actor_id: int, target_id: int) -> bool:
 
 _GFEAT_USAGE_TEXT = (
     "ℹ️ **Foydalanish:** `/gfeat <funksiya> <on|off>`\n\n"
-    "**Funksiyalar:** `utag`, `scraper`, `massdm`, `chat`, `memory`\n\n"
+    "**Funksiyalar:** `utag`, `scraper`, `massdm`, `chat`\n\n"
     "**Misollar:**\n"
     "• `/gfeat utag off` — Utag'ni HAMMA uchun o'chiradi\n"
     "• `/gfeat utag on` — Utag'ni hamma uchun qayta yoqadi\n"
@@ -136,7 +136,7 @@ _GFEAT_USAGE_TEXT = (
 
 _FEAT_USAGE_TEXT = (
     "ℹ️ **Foydalanish:** `/feat <funksiya> <user_id> <on|off>`\n\n"
-    "**Funksiyalar:** `utag`, `scraper`, `massdm`, `chat`, `memory`\n\n"
+    "**Funksiyalar:** `utag`, `scraper`, `massdm`, `chat`\n\n"
     "**Misollar:**\n"
     "• `/feat utag 123456789 off` — shu user uchun Utag'ni o'chiradi\n"
     "• `/feat utag 123456789 on` — qayta yoqadi\n"

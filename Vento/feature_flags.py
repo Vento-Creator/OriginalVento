@@ -29,7 +29,6 @@ FEATURES = {
     "scraper": "🔍 Scraper",
     "massdm": "📨 Mass DM",
     "chat": "💬 Anonim chat",
-    "memory": "🧠 Xotira o'yini",
 }
 
 # ------------------------- Anti-flood sozlamalari -------------------------
@@ -53,7 +52,7 @@ _tables_ready = False
 # ------------------------- DB -------------------------
 
 async def _ensure_tables() -> None:
-    """Jadvallarni birinchi kerak bo'lganda yaratadi (lazy, memory_game patterni)."""
+    """Jadvallarni birinchi kerak bo'lganda yaratadi (lazy)."""
     global _tables_ready
     if _tables_ready:
         return

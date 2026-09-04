@@ -19,7 +19,7 @@ VALID_CALLBACK_PATTERNS = [
     "approve_", "reject_", "user_", "stop_utag_", "contact_", "complaint_",
     "resend_code", "code_help", "close_help",
     "complaints_", "chat_", "group_search", "guide_", "owner_", "broadcast_retry",
-    "bc_", "language", "account_link", "mem_", "feat|"
+    "bc_", "language", "account_link", "feat|"
 ]
 
 MAX_BUTTON_ROWS = 10
@@ -34,10 +34,6 @@ def is_valid_callback_data(callback_data: str) -> bool:
     """Check if callback data matches valid patterns"""
     if not callback_data:
         return False
-    
-    # Special case for memory game: mem|number or mem|menu or mem|leaderboard
-    if callback_data.startswith("mem|"):
-        return True
     
     for pattern in VALID_CALLBACK_PATTERNS:
         if callback_data.startswith(pattern):
@@ -157,18 +153,18 @@ async def banned_user_middleware(client: Client, message: Message):
 @Client.on_callback_query(group=-1)
 async def banned_callback_middleware(client: Client, callback_query: CallbackQuery):
     # DIAGNOSTIC: Log callback data
-    security_logger.info("[DIAG] CALLBACK_RECEIVED: data=%s user_id=%d", callback_query.data, callback_query.from_user.id if callback_query.from_user else None)
+    security_logger.debug("[DIAG] CALLBACK_RECEIVED: data=%s user_id=%d", callback_query.data, callback_query.from_user.id if callback_query.from_user else None)
     
     if not callback_query.from_user:
-        security_logger.info("[DIAG] CALLBACK_BLOCKED: no from_user")
+        security_logger.debug("[DIAG] CALLBACK_BLOCKED: no from_user")
         raise ContinuePropagation
 
     if config.is_admin(callback_query.from_user.id):
-        security_logger.info("[DIAG] CALLBACK_BYPASS: admin user_id=%d", callback_query.from_user.id)
+        security_logger.debug("[DIAG] CALLBACK_BYPASS: admin user_id=%d", callback_query.from_user.id)
         raise ContinuePropagation
 
     if callback_query.data == "show_laws":
-        security_logger.info("[DIAG] CALLBACK_BYPASS: show_laws")
+        security_logger.debug("[DIAG] CALLBACK_BYPASS: show_laws")
         raise ContinuePropagation # Allow them to read the laws
 
     count = await get_violation_count(callback_query.from_user.id)

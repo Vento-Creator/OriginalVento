@@ -41,6 +41,7 @@ app = Client(
     bot_token=BOT_TOKEN,
     workdir=BASE_DIR,
     plugins=dict(root="plugins"),
+    workers=8,
     device_model="iPhone",
     app_version="11.7.2",
     system_version="iOS 17.5.1"

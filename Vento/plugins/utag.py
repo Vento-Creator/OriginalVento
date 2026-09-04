@@ -432,16 +432,16 @@ async def custom_utag_command_handler(client: Client, message: Message):
     
     parts = text[1:].split()
     if not parts:
-        logger.info("[UTAG_DEBUG] STEP 2: RETURN - no command parts")
+        logger.debug("[UTAG_DEBUG] STEP 2: RETURN - no command parts")
         raise ContinuePropagation
     
     # Strip a trailing ``@botusername``: in groups Telegram delivers slash commands as
     # ``/atag@MyBot`` (a user typing plain ``/atag`` is sent to all bots this way),
     # and both forms must be accepted.
     cmd = parts[0].lstrip('.').lower().split("@", 1)[0]
-    logger.info(f"[UTAG_DEBUG] STEP 2: parsed command cmd={cmd!r}")
+    logger.debug(f"[UTAG_DEBUG] STEP 2: parsed command cmd={cmd!r}")
     custom_cmds = await _load_custom_cmds(user_id)
-    logger.info(f"[UTAG_DEBUG] STEP 3: loaded custom commands custom_cmds={custom_cmds!r}")
+    logger.debug(f"[UTAG_DEBUG] STEP 3: loaded custom commands custom_cmds={custom_cmds!r}")
     atag_cmd = custom_cmds.get("atag", "atag")
 
     stop_cmd = custom_cmds.get("stop", "stop")
@@ -567,7 +567,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
         raise ContinuePropagation
     
     if cmd != atag_cmd:
-        logger.info(f"[UTAG_DEBUG] STEP 4: RETURN - command not matched cmd={cmd!r} atag_cmd={atag_cmd!r}")
+        logger.debug(f"[UTAG_DEBUG] STEP 4: RETURN - command not matched cmd={cmd!r} atag_cmd={atag_cmd!r}")
         raise ContinuePropagation
     
 

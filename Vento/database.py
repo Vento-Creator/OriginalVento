@@ -6,13 +6,16 @@ from contextlib import asynccontextmanager
 import os
 import asyncio
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# Write lock for serialized database updates (inserts, updates, deletes, replaces, alters)
-db_write_lock = asyncio.Lock()
+# PostgreSQL (asyncpg) handles concurrent writes with row-level locking.
+# A process-wide write lock is not used: it would serialize unrelated
+# tables and stall the bot without giving multi-statement transactions
+# (each statement already auto-commits).
 
 def translate_query(sql, parameters):
     if not parameters:
@@ -80,7 +83,7 @@ class SafeCursorContextManager:
         return False
 
 class SafeDatabaseConnection:
-    """Wrapper around asyncpg connection to automatically manage global write locking and SQLite compatibility.
+    """Wrapper around an asyncpg connection with SQLite-style execute() compatibility.
     """
     def __init__(self, conn):
         self._conn = conn
@@ -88,20 +91,9 @@ class SafeDatabaseConnection:
 
     def execute(self, sql, parameters=None):
         async def _run():
-            sql_clean = sql.strip().upper()
-            words = [w for w in sql_clean.split() if w and not w.startswith("--")]
-            is_write = False
-            if words:
-                first_word = words[0].strip("()[]{},;\"'`")
-                is_write = first_word in ["INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER"]
-
             pg_sql, pg_params = translate_query(sql, parameters)
             try:
-                if is_write:
-                    async with db_write_lock:
-                        rows = await self._conn.fetch(pg_sql, *pg_params)
-                else:
-                    rows = await self._conn.fetch(pg_sql, *pg_params)
+                rows = await self._conn.fetch(pg_sql, *pg_params)
                 return MockSQLiteCursor(rows)
             except Exception as e:
                 logger.error(f"PostgreSQL Execute Error: {e} | SQL: {pg_sql} | Params: {pg_params}")
@@ -111,20 +103,9 @@ class SafeDatabaseConnection:
 
     def executemany(self, sql, seq_of_parameters):
         async def _run():
-            sql_clean = sql.strip().upper()
-            words = [w for w in sql_clean.split() if w and not w.startswith("--")]
-            is_write = False
-            if words:
-                first_word = words[0].strip("()[]{},;\"'`")
-                is_write = first_word in ["INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER"]
-
             pg_sql, _ = translate_query(sql, seq_of_parameters[0] if seq_of_parameters else None)
             try:
-                if is_write:
-                    async with db_write_lock:
-                        await self._conn.executemany(pg_sql, seq_of_parameters)
-                else:
-                    await self._conn.executemany(pg_sql, seq_of_parameters)
+                await self._conn.executemany(pg_sql, seq_of_parameters)
                 return MockSQLiteCursor([])
             except Exception as e:
                 logger.error(f"PostgreSQL Executemany Error: {e} | SQL: {pg_sql}")
@@ -134,16 +115,13 @@ class SafeDatabaseConnection:
 
     async def commit(self):
         # asyncpg auto-commits each statement, no explicit commit needed
-        # Write lock is now managed in execute/executemany with context manager
         pass
 
     async def rollback(self):
         # asyncpg auto-commits, rollback is a no-op
-        # Write lock is now managed in execute/executemany with context manager
         pass
 
     async def close(self):
-        # Write lock is now managed in execute/executemany with context manager
         pass
 
     def __getattr__(self, name):
@@ -153,7 +131,6 @@ class SafeDatabaseConnection:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # Write lock is now managed in execute/executemany with context manager
         pass
         return False
 
@@ -166,8 +143,8 @@ async def init_pool():
         if db_pool is None:
             db_pool = await asyncpg.create_pool(
                 DATABASE_URL,
-                min_size=2,
-                max_size=10,
+                min_size=3,
+                max_size=20,
                 ssl="require",
                 statement_cache_size=0
             )
@@ -185,7 +162,6 @@ async def get_db_connection():
     try:
         yield safe_conn
     finally:
-        # Write lock is now managed in execute/executemany with context manager
         await db_pool.release(conn)
 
 async def init_db():
@@ -193,10 +169,10 @@ async def init_db():
     pass
 
 
-import time
-
 _user_status_cache = {}
-CACHE_TTL = 8.0
+CACHE_TTL = 30.0
+_violation_cache = {}
+_VIOLATION_CACHE_TTL = 60.0
 
 async def _get_cached_user_data(user_id: int):
     now = time.time()
@@ -542,12 +518,21 @@ async def delete_all_scraped_groups():
         await db.commit()
 
 async def get_violation_count(user_id):
+    now = time.time()
+    cached = _violation_cache.get(user_id)
+    if cached and (now - cached["timestamp"]) < _VIOLATION_CACHE_TTL:
+        return cached["count"]
+
     async with get_db_connection() as db:
         async with db.execute("SELECT violation_count FROM banned_users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else 0
+            count = row[0] if row else 0
 
-async def add_violation(user_id):
+    _violation_cache[user_id] = {"count": count, "timestamp": now}
+    return count
+
+async def add_violation(user_id, reason=None):
+    """Ban hisoblagichini oshiradi. reason chaqiruvchilar uchun qabul qilinadi, saqlanadigan qiymat — count."""
     async with get_db_connection() as db:
         async with db.execute("SELECT violation_count FROM banned_users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
@@ -558,9 +543,11 @@ async def add_violation(user_id):
         else:
             await db.execute("UPDATE banned_users SET violation_count = ? WHERE user_id = ?", (new_count, user_id))
         await db.commit()
-        return new_count
+    _violation_cache[user_id] = {"count": new_count, "timestamp": time.time()}
+    return new_count
 
 async def remove_ban(user_id):
+    _violation_cache.pop(user_id, None)
     async with get_db_connection() as db:
         await db.execute("DELETE FROM banned_users WHERE user_id = ?", (user_id,))
         await db.commit()

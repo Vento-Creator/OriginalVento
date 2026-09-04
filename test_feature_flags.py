@@ -173,9 +173,9 @@ async def run_tests():
     # T8: kesh — TTL ichida takroriy DB so'rov yo'q
     ff._reset_state_for_tests()
     QUERY_COUNT["n"] = 0
-    await ff.get_user_flag(400, "memory")
-    await ff.get_user_flag(400, "memory")
-    await ff.get_user_flag(400, "memory")
+    await ff.get_user_flag(400, "utag")
+    await ff.get_user_flag(400, "utag")
+    await ff.get_user_flag(400, "utag")
     check("T8 kesh: 3 o'qishda 1 DB so'rov", QUERY_COUNT["n"] == 1, f"| queries={QUERY_COUNT['n']}")
 
     # T9: get_user_features xaritasi
@@ -185,16 +185,16 @@ async def run_tests():
     check("T9 get_user_features: chat=False, qolganlari True", ok)
 
     # T10: global features xaritasi
-    await ff.set_global_feature("memory", False)
+    await ff.set_global_feature("chat", False)
     g = await ff.get_global_features()
-    ok = g["memory"] is False and g["utag"] is True
-    check("T10 get_global_features: memory=False", ok)
+    ok = g["chat"] is False and g["utag"] is True
+    check("T10 get_global_features: chat=False", ok)
 
     # T11: CallbackQuery yo'li — answer orqali ogohlantirish
     ff._reset_state_for_tests()
-    await ff.set_user_feature(500, "memory", False)
+    await ff.set_user_feature(500, "chat", False)
     cb = FakeCallback(500)
-    r = await ff.gate_feature(cb, "memory")
+    r = await ff.gate_feature(cb, "chat")
     ok = r is False and len(cb.answers) == 1
     check("T11 callback: show_alert ogohlantirish", ok)
 
@@ -204,7 +204,7 @@ async def run_tests():
     sec = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(sec)
-        ok = sec.is_valid_callback_data("feat|toggle|utag") and sec.is_valid_callback_data("feat|global|memory")
+        ok = sec.is_valid_callback_data("feat|toggle|utag") and sec.is_valid_callback_data("feat|global|chat")
         check("T12 security whitelist: 'feat|...' valid", ok)
     except Exception as e:
         check("T12 security whitelist: 'feat|...' valid", False, f"({e})")
