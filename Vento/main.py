@@ -135,9 +135,11 @@ async def register_bot_commands():
         # Never block startup on a registration failure; log and continue.
         logger.warning("Bot command registration failed: %r", e)
 
-    # Set the "Menu" button to open Mini App instead of showing commands list
+    # Set the "Menu" button to open Mini App instead of showing commands list.
+    # stdlib urllib: bot image does not install httpx (that package is only for mini-app).
     try:
-        import httpx
+        import json
+        import urllib.request
         from config import MINI_APP_URL, BOT_TOKEN as _BOT_TOKEN
         url = f"https://api.telegram.org/bot{_BOT_TOKEN}/setChatMenuButton"
         payload = {
@@ -147,13 +149,23 @@ async def register_bot_commands():
                 "web_app": {"url": MINI_APP_URL}
             }
         }
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload, timeout=10)
-            result = resp.json()
-            if result.get("ok"):
-                logger.info("Menu button set to Mini App: %s", MINI_APP_URL)
-            else:
-                logger.warning("Menu button API response: %s", result)
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        def _post_menu_button():
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        result = await asyncio.to_thread(_post_menu_button)
+        if result.get("ok"):
+            logger.info("Menu button set to Mini App: %s", MINI_APP_URL)
+        else:
+            logger.warning("Menu button API response: %s", result)
     except Exception as e:
         logger.warning("Menu button setup failed: %r", e)
 
