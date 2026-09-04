@@ -1,5 +1,8 @@
+import { useRemaining } from '../utils/subscription'
+
 export default function Profile({ user }) {
   const tg = window.Telegram?.WebApp
+  const remaining = useRemaining(user?.subscription_expiry, user?.is_free)
 
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
   const username = user?.username ? `@${user.username}` : '—'
@@ -19,11 +22,14 @@ export default function Profile({ user }) {
         <h2 style={{ fontSize: 20, fontWeight: 700 }}>{name || 'Foydalanuvchi'}</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 4 }}>{username}</p>
         <div style={{ marginTop: 12 }}>
-          {user?.has_subscription
+          {remaining.active
             ? <span className="badge badge-success">✅ Obuna faol</span>
             : <span className="badge badge-danger">❌ Obuna yo'q</span>
           }
         </div>
+        {remaining.active && !remaining.free && (
+          <p className="countdown" style={{ marginTop: 10, fontSize: 18 }}>{remaining.label}</p>
+        )}
       </div>
 
       {/* Info */}
@@ -57,9 +63,11 @@ export default function Profile({ user }) {
             </div>
           </div>
           <div className="item-value">
-            {user?.subscription_expiry && user.subscription_expiry > 0
-              ? new Date(user.subscription_expiry * 1000).toLocaleDateString('uz-UZ')
-              : '—'
+            {user?.is_free
+              ? 'Cheksiz'
+              : user?.subscription_expiry && user.subscription_expiry > 0
+                ? new Date(user.subscription_expiry * 1000).toLocaleString('uz-UZ')
+                : '—'
             }
           </div>
         </div>

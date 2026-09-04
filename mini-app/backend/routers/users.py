@@ -1,7 +1,7 @@
-import time
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from auth import get_current_user
 from db import get_pool
+from sub_status import build_sub_status
 
 router = APIRouter()
 
@@ -12,41 +12,28 @@ async def get_me(user: dict = Depends(get_current_user)):
     uid = user["id"]
     pool = await get_pool()
 
-    # Obuna holati
     row = await pool.fetchrow(
         "SELECT expiry_date, is_active, username, first_name FROM users WHERE user_id = $1",
         uid
     )
 
-    # Ban holati
     banned = await pool.fetchrow(
         "SELECT user_id FROM banned_users WHERE user_id = $1", uid
     )
 
-    # Free user
     free = await pool.fetchrow(
         "SELECT user_id FROM free_users WHERE user_id = $1", uid
     )
 
-    # Admin
     admin_row = await pool.fetchrow(
         """SELECT can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users
            FROM admins WHERE admin_id = $1""",
         uid
     )
 
-    now = int(time.time())
-
-    if row:
-        expiry = row["expiry_date"] or 0
-        is_active = bool(row["is_active"])
-        days_left = max(0, (expiry - now) // 86400) if expiry > now else 0
-        has_sub = expiry > now or bool(free)
-    else:
-        expiry = 0
-        is_active = False
-        days_left = 0
-        has_sub = bool(free)
+    expiry = (row["expiry_date"] if row else 0) or 0
+    is_active_flag = bool(row["is_active"]) if row else False
+    sub = build_sub_status(expiry, bool(free))
 
     return {
         "id": uid,
@@ -55,12 +42,14 @@ async def get_me(user: dict = Depends(get_current_user)):
         "username": user.get("username", ""),
         "photo_url": user.get("photo_url", ""),
         "language_code": user.get("language_code", "uz"),
-        "is_active": is_active,
+        "is_active": is_active_flag,
         "is_banned": bool(banned),
-        "is_free": bool(free),
-        "has_subscription": has_sub,
-        "subscription_expiry": expiry,
-        "days_left": days_left,
+        "is_free": sub["is_free"],
+        "has_subscription": sub["has_subscription"],
+        "subscription_expiry": sub["expiry_date"],
+        "seconds_left": sub["seconds_left"],
+        "days_left": sub["days_left"],
+        "can_purchase": sub["can_purchase"],
         "is_admin": bool(admin_row),
         "admin_permissions": dict(admin_row) if admin_row else None,
     }

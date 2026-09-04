@@ -2,6 +2,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException
 from auth import get_current_user
 from db import get_pool
+from sub_status import build_sub_status
 
 router = APIRouter()
 
@@ -46,11 +47,12 @@ async def list_users(
     total_row = await pool.fetchrow("SELECT COUNT(*) as cnt FROM users")
     total = total_row["cnt"]
 
-    now = int(time.time())
     for r in rows:
-        expiry = r.get("expiry_date") or 0
-        r["days_left"] = max(0, (expiry - now) // 86400) if expiry > now else 0
-        r["has_subscription"] = bool(r["is_free"]) or expiry > now
+        sub = build_sub_status(r.get("expiry_date") or 0, bool(r.get("is_free")))
+        r["days_left"] = sub["days_left"]
+        r["has_subscription"] = sub["has_subscription"]
+        r["seconds_left"] = sub["seconds_left"]
+        r["can_purchase"] = sub["can_purchase"]
 
     return {"users": rows, "total": total, "page": page, "limit": limit}
 

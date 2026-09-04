@@ -397,8 +397,10 @@ async def add_member_handler(client: Client, message: Message):
             return
         target_id = int(args[1])
         days = int(args[2])
-        expiry_date = int(time.time()) + (days * 86400)
-        
+        if days <= 0:
+            await message.reply_text("Kun soni 0 dan katta bo'lishi kerak.")
+            return
+
         username = None
         first_name = None
         try:
@@ -407,9 +409,24 @@ async def add_member_handler(client: Client, message: Message):
             first_name = user_info.first_name
         except:
             pass
-        
-        await add_or_update_user(target_id, expiry_date, username, first_name)
-        await message.reply_text(f"✅ `{target_id}` ga **{days} kunlik** obuna berildi.")
+
+        from database import grant_subscription
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        new_expiry = await grant_subscription(target_id, days)
+        if username or first_name:
+            from database import get_db_connection
+            async with get_db_connection() as db:
+                await db.execute(
+                    "UPDATE users SET username = ?, first_name = ? WHERE user_id = ?",
+                    (username, first_name, target_id),
+                )
+                await db.commit()
+        stamp = datetime.fromtimestamp(new_expiry, ZoneInfo("Asia/Tashkent")).strftime("%d.%m.%Y %H:%M")
+        await message.reply_text(
+            f"✅ `{target_id}` ga **{days} kun** qo'shildi.\n"
+            f"Tugash vaqti: `{stamp}`"
+        )
         
         await log_admin_action(message.from_user.id, "add_subscription", target_id, f"Days: {days}")
         
@@ -705,8 +722,8 @@ async def approve_sub_callback(client: Client, cq: CallbackQuery):
     
     target_id = int(cq.matches[0].group("uid"))
     days = int(cq.matches[0].group("days"))
-    expiry_date = int(time.time()) + (days * 86400)
-    await add_or_update_user(target_id, expiry_date)
+    from database import grant_subscription
+    await grant_subscription(target_id, days)
     await cq.message.edit_text(
         f"{cq.message.text}\n\n✅ **Tasdiqlandi!** `{target_id}` ga {days} kunlik obuna berildi."
     )

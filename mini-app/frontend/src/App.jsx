@@ -18,15 +18,35 @@ export default function App() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    usersApi.getMe()
-      .then(r => {
-        if (typeof r.data === 'string' && r.data.includes('<!doctype html>')) {
-          throw new Error("Backend tizimiga ulanib bo'lmadi (API URL xatosi)")
-        }
-        setUser(r.data)
-      })
-      .catch(e => setError(e.response?.data?.detail || e.message || 'Xatolik yuz berdi'))
-      .finally(() => setLoading(false))
+    let cancelled = false
+
+    const load = () => {
+      usersApi.getMe()
+        .then(r => {
+          if (cancelled) return
+          if (typeof r.data === 'string' && r.data.includes('<!doctype html>')) {
+            throw new Error("Backend tizimiga ulanib bo'lmadi (API URL xatosi)")
+          }
+          setUser(r.data)
+          setError(null)
+        })
+        .catch(e => {
+          if (!cancelled) setError(e.response?.data?.detail || e.message || 'Xatolik yuz berdi')
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    }
+
+    load()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   if (loading) return <LoadingScreen />

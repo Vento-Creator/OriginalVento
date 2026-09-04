@@ -1,13 +1,14 @@
 import { Link } from 'react-router-dom'
+import { useRemaining } from '../utils/subscription'
 
 export default function Dashboard({ user }) {
-  const daysLeft = user?.days_left || 0
-  const hasSub = user?.has_subscription
+  const remaining = useRemaining(user?.subscription_expiry, user?.is_free)
+  const hasSub = remaining.active
+  const canPurchase = !user?.is_free && !hasSub
   const name = user?.first_name || 'Foydalanuvchi'
 
   return (
     <div className="page">
-      {/* Hero */}
       <div className="hero-card">
         {user?.photo_url
           ? <img src={user.photo_url} alt="avatar" className="avatar" />
@@ -17,7 +18,7 @@ export default function Dashboard({ user }) {
         <p className="sub-text">Vento Mini App ga xush kelibsiz</p>
         <div style={{ marginTop: 12 }}>
           {hasSub
-            ? <span className="badge badge-success">✅ Faol — {daysLeft} kun</span>
+            ? <span className="badge badge-success">✅ Obuna faol</span>
             : <span className="badge badge-danger">❌ Obuna yo'q</span>
           }
           {user?.is_admin && (
@@ -26,19 +27,17 @@ export default function Dashboard({ user }) {
         </div>
       </div>
 
-      {/* Stats */}
       <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-value">{daysLeft}</div>
-          <div className="stat-label">Kun qoldi</div>
+          <div className="stat-value countdown">{hasSub ? remaining.label : '—'}</div>
+          <div className="stat-label">{remaining.free ? 'Obuna' : 'Qolgan vaqt'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{user?.is_free ? '∞' : (hasSub ? '✓' : '✗')}</div>
-          <div className="stat-label">Obuna holati</div>
+          <div className="stat-value">{hasSub ? '✓' : '✗'}</div>
+          <div className="stat-label">Holat</div>
         </div>
       </div>
 
-      {/* Quick Actions */}
       <p className="section-title">Tezkor harakatlar</p>
       <div className="quick-actions">
         <Link to="/subscription" className="action-btn">
@@ -65,8 +64,7 @@ export default function Dashboard({ user }) {
         )}
       </div>
 
-      {/* Info */}
-      {!hasSub && (
+      {canPurchase && (
         <div className="card card-gradient">
           <p style={{ fontWeight: 600, marginBottom: 8 }}>⭐ Obuna faollashtiring</p>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>

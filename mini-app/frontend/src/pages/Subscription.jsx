@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { subscriptionApi } from '../api'
+import { useRemaining } from '../utils/subscription'
 
 export default function Subscription({ user }) {
   const [data, setData] = useState(null)
@@ -11,6 +12,11 @@ export default function Subscription({ user }) {
       .then(r => setData(r.data))
       .finally(() => setLoading(false))
   }, [])
+
+  const expiry = data?.expiry_date ?? user?.subscription_expiry ?? 0
+  const isFree = data?.is_free ?? user?.is_free
+  const remaining = useRemaining(expiry, isFree)
+  const canPurchase = !loading && !isFree && !remaining.active
 
   const openInvoice = () => {
     const tg = window.Telegram?.WebApp
@@ -41,12 +47,15 @@ export default function Subscription({ user }) {
       })
   }
 
-  const expiryDate = data?.expiry_date
-    ? new Date(data.expiry_date * 1000).toLocaleDateString('uz-UZ')
+  const expiryDate = expiry
+    ? new Date(expiry * 1000).toLocaleString('uz-UZ', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      })
     : null
 
-  const progressPct = data?.days_left
-    ? Math.min(100, (data.days_left / 30) * 100)
+  const progressPct = remaining.active && !remaining.free
+    ? Math.min(100, (remaining.ms / (30 * 86400 * 1000)) * 100)
     : 0
 
   return (
@@ -55,31 +64,32 @@ export default function Subscription({ user }) {
         <h1>⭐ Obuna</h1>
       </div>
 
-      {/* Status card */}
       <div className="hero-card">
         <div style={{ fontSize: 40, marginBottom: 12 }}>
-          {data?.is_active ? '✅' : '❌'}
+          {remaining.active ? '✅' : '❌'}
         </div>
         <h2 style={{ fontSize: 20 }}>
-          {data?.is_free
+          {remaining.free
             ? 'Bepul (cheksiz)'
-            : data?.is_active
-              ? `${data.days_left} kun qoldi`
+            : remaining.active
+              ? remaining.label
               : 'Obuna faol emas'
           }
         </h2>
-        {expiryDate && (
-          <p className="sub-text">Tugash sanasi: {expiryDate}</p>
+        {remaining.active && !remaining.free && (
+          <p className="sub-text">Teskari sanoq — tasdiqlangan / uzaytirilgan muddat</p>
         )}
-        {data?.is_active && !data?.is_free && (
+        {expiryDate && remaining.active && !remaining.free && (
+          <p className="sub-text">Tugash: {expiryDate}</p>
+        )}
+        {remaining.active && !remaining.free && (
           <div className="sub-progress">
             <div className="sub-progress-bar" style={{ width: `${progressPct}%` }} />
           </div>
         )}
       </div>
 
-      {/* Buy section */}
-      {!data?.is_free && !loading && (
+      {canPurchase && (
         <div className="card card-gradient">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
             <div style={{ fontSize: 32 }}>⭐</div>
@@ -97,7 +107,6 @@ export default function Subscription({ user }) {
         </div>
       )}
 
-      {/* Payment history */}
       {data?.payment_history?.length > 0 && (
         <>
           <p className="section-title">To'lovlar tarixi</p>

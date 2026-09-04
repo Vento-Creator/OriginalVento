@@ -1,8 +1,8 @@
-import time
 import os
 from fastapi import APIRouter, Depends, HTTPException
 from auth import get_current_user
 from db import get_pool
+from sub_status import build_sub_status
 import httpx
 
 router = APIRouter()
@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.get("/")
 async def get_subscription(user: dict = Depends(get_current_user)):
-    """Foydalanuvchining obuna holatini qaytaradi."""
+    """Foydalanuvchining obuna holatini qaytaradi (tasdiq / admin kunlari / to'lov — bir xil expiry)."""
     uid = user["id"]
     pool = await get_pool()
 
@@ -22,7 +22,6 @@ async def get_subscription(user: dict = Depends(get_current_user)):
         "SELECT user_id FROM free_users WHERE user_id = $1", uid
     )
 
-    # To'lov tarixi
     payments = await pool.fetch(
         """SELECT payment_id, amount, currency, status, created_at, granted_expiry
            FROM payments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10""",
@@ -30,17 +29,10 @@ async def get_subscription(user: dict = Depends(get_current_user)):
     )
     payments = [dict(r) for r in payments]
 
-    now = int(time.time())
-    expiry = row["expiry_date"] if row else 0
-    days_left = max(0, (expiry - now) // 86400) if expiry and expiry > now else 0
-
-    return {
-        "is_free": bool(free),
-        "expiry_date": expiry,
-        "days_left": days_left,
-        "is_active": bool(free) or (expiry > now if expiry else False),
-        "payment_history": payments,
-    }
+    expiry = (row["expiry_date"] if row else 0) or 0
+    sub = build_sub_status(expiry, bool(free))
+    sub["payment_history"] = payments
+    return sub
 
 
 @router.get("/history")
@@ -63,6 +55,21 @@ async def get_payment_history(user: dict = Depends(get_current_user)):
 async def create_invoice(user: dict = Depends(get_current_user)):
     """Telegram Stars orqali invoice link yaratadi."""
     uid = user["id"]
+    pool = await get_pool()
+
+    row = await pool.fetchrow(
+        "SELECT expiry_date FROM users WHERE user_id = $1", uid
+    )
+    free = await pool.fetchrow(
+        "SELECT user_id FROM free_users WHERE user_id = $1", uid
+    )
+    sub = build_sub_status((row["expiry_date"] if row else 0) or 0, bool(free))
+    if not sub["can_purchase"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Obuna allaqachon faol. Tugagach qayta sotib olish mumkin.",
+        )
+
     token = os.getenv("BOT_TOKEN")
     if not token:
         raise HTTPException(status_code=500, detail="BOT_TOKEN environment o'rnatilmagan!")

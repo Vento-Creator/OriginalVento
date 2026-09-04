@@ -61,6 +61,11 @@ def validate_telegram_init_data(init_data: str) -> dict:
     except Exception:
         raise HTTPException(status_code=401, detail="user ma'lumoti noto'g'ri")
 
+    try:
+        user["id"] = int(user["id"])
+    except (TypeError, ValueError, KeyError):
+        raise HTTPException(status_code=401, detail="user id noto'g'ri")
+
     return user
 
 
