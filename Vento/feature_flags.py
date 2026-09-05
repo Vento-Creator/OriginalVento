@@ -224,6 +224,8 @@ async def get_global_features() -> Dict[str, bool]:
 # Kelgusi: sub_price_stars, force_channels (JSON), ...
 _SETTING_DEFAULTS: Dict[str, str] = {
     "referral_enabled": "1",
+    "force_join_enabled": "0",
+    # force_channels — JSON ro'yxat (plugins/force_join.py boshqaradi)
 }
 
 _setting_cache: Dict[str, Tuple[str, float]] = {}

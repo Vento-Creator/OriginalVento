@@ -334,6 +334,11 @@ async def start_handler(client: Client, message: Message):
             return
 
         logger.info("[START_TRACE] STEP29: About to call get_main_keyboard")
+        # Majburiy kanal obunasi tekshiruvi (yoqilgan bo'lsa)
+        from plugins.force_join import enforce_force_join
+        if not await enforce_force_join(client, message):
+            logger.info("[START_TRACE] STEP29a: Force join screen shown, returning")
+            return
         kb = await get_main_keyboard(uid)
         logger.info("[START_TRACE] STEP30: get_main_keyboard done")
         logger.info("[START_TRACE] STEP31: About to send final welcome message")

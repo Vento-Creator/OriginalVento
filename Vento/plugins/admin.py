@@ -63,6 +63,7 @@ async def admin_command_handler(client: Client, message: Message):
         [InlineKeyboardButton(get_text("recent_actions", lang), callback_data="adm_acts_list_0")],
         [InlineKeyboardButton(get_text("statistics", lang), callback_data="admin_stats")],
         [InlineKeyboardButton("👥 Referral", callback_data="admin_referrals")],
+        [InlineKeyboardButton("📢 Majburiy obuna", callback_data="admin_force_join")],
         [InlineKeyboardButton(get_text("subscribed_users", lang), callback_data="admin_sub_list")],
         [InlineKeyboardButton(get_text("free_users_list", lang), callback_data="admin_free_list")],
         [InlineKeyboardButton(get_text("banned_list", lang), callback_data="adm_bans")],
@@ -114,6 +115,7 @@ async def admin_panel_callback(client: Client, cq: CallbackQuery):
         [InlineKeyboardButton(get_text("recent_actions", lang), callback_data="adm_acts_list_0")],
         [InlineKeyboardButton(get_text("statistics", lang), callback_data="admin_stats")],
         [InlineKeyboardButton("👥 Referral", callback_data="admin_referrals")],
+        [InlineKeyboardButton("📢 Majburiy obuna", callback_data="admin_force_join")],
         [InlineKeyboardButton(get_text("subscribed_users", lang), callback_data="admin_sub_list")],
         [InlineKeyboardButton(get_text("free_users_list", lang), callback_data="admin_free_list")],
         [InlineKeyboardButton(get_text("banned_list", lang), callback_data="adm_bans")],
@@ -1453,6 +1455,12 @@ async def admin_add_handler(client: Client, message: Message):
         )
         return
     
+    if state == "admin_fj_add_channel":
+        user_states.pop(uid, None)
+        from plugins.force_join import handle_admin_add_channel_input
+        await handle_admin_add_channel_input(client, message)
+        return
+
     if state == "admin_add_new":
         if not is_owner(uid):
             user_states.pop(uid, None)
