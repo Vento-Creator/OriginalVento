@@ -294,6 +294,23 @@ async def payment_approve_callback(client: Client, cq: CallbackQuery):
     except Exception as e:
         logger.error(f"Failed to auto-complete login state for user {target_id}: {e}")
 
+    # Referral bonus: reward the inviter when the referred user's payment is approved
+    try:
+        from database import get_referrer, apply_referral_bonus, REFERRAL_BONUS_PAYMENT_DAYS
+        referrer_id = await get_referrer(target_id)
+        if referrer_id and await apply_referral_bonus(referrer_id, REFERRAL_BONUS_PAYMENT_DAYS):
+            try:
+                await client.send_message(
+                    referrer_id,
+                    f"💰 **Taklif bonusi!**\n\n"
+                    f"Siz taklif qilgan foydalanuvchi obuna sotib oldi.\n"
+                    f"🎁 Sizga +{REFERRAL_BONUS_PAYMENT_DAYS} kun obuna qo'shildi!",
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Referral payment bonus failed for {target_id}: {e}")
+
     try:
         await cq.message.edit_text(
             f"{cq.message.text}\n\n✅ **Tasdiqlandi!** `{target_id}` uchun 30 kunlik obuna faollashtildi."

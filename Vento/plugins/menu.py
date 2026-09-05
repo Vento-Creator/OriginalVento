@@ -46,9 +46,10 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
         else:
             rows.append([KeyboardButton("🌐 Til")])
         if is_free and not has_paid_sub and not adm:
-            rows.append([KeyboardButton("⭐️ Obuna sotib olish"), KeyboardButton("👤 Akkaunt")])
-        else:
+            rows.append([KeyboardButton("⭐️ Obuna sotib olish"), KeyboardButton("👥 Takliflar")])
             rows.append([KeyboardButton("👤 Akkaunt")])
+        else:
+            rows.append([KeyboardButton("👥 Takliflar"), KeyboardButton("👤 Akkaunt")])
         
         if not adm:
             rows.append([KeyboardButton("📞 Bog'lanish")])
@@ -82,7 +83,7 @@ _MENU_TEXTS = {
     "⭐️ Obuna", "⭐️ Obuna sotib olish", "⭐️ Obuna haqida",
     "👤 Akkaunt", "🛠 Admin Panel", "📱 Akkaunt ulash", "🔙 Bosh menyu",
     "📣 Yangiliklar", "📞 Bog'lanish", "💬 Chatlar", "🌐 Til",
-    "⚙️ Funksiyalar",
+    "⚙️ Funksiyalar", "👥 Takliflar",
 }
 
 @Client.on_message(filters.private & filters.text, group=-10)
@@ -121,7 +122,30 @@ async def start_handler(client: Client, message: Message):
         uid  = message.from_user.id
         name = message.from_user.first_name
         logger.info(f"[START_TRACE] STEP2: Got uid={uid}, name={name}")
-        
+
+        # Referral deep-link capture: /start ref_<referrer_id>
+        # Runs before auth checks so the invite is recorded even when the
+        # invitee is still unauthenticated / pending approval.
+        try:
+            parts = (message.text or "").split()
+            if len(parts) > 1 and parts[1].startswith("ref_") and parts[1][4:].isdigit():
+                ref_id = int(parts[1][4:])
+                if ref_id and ref_id != uid:
+                    from database import set_user_referrer, apply_referral_bonus, REFERRAL_BONUS_REGISTRATION_DAYS
+                    if await set_user_referrer(uid, ref_id):
+                        if await apply_referral_bonus(ref_id, REFERRAL_BONUS_REGISTRATION_DAYS):
+                            try:
+                                await client.send_message(
+                                    ref_id,
+                                    f"🎉 **Yangi taklif!**\n\n"
+                                    f"{message.from_user.mention} sizning havolangiz orqali botga qo'shildi.\n"
+                                    f"🎁 Sizga +{REFERRAL_BONUS_REGISTRATION_DAYS} kun obuna berildi!",
+                                )
+                            except Exception:
+                                pass
+        except Exception as e:
+            logger.warning(f"Referral capture failed for {uid}: {e}")
+
         # MANDATORY: Database-driven authentication check - MUST be first check
         # DB is_active is the ONLY source of truth for authentication status
         # Disk .session files MUST NEVER determine authentication state
@@ -388,6 +412,11 @@ async def menu_button_handler(client: Client, message: Message):
                     [InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_login")]
                 ])
             )
+            return
+
+        if txt == "👥 Takliflar":
+            from plugins.referral import handle_referral_menu
+            await handle_referral_menu(client, message)
             return
 
         if txt == "👤 Akkaunt":

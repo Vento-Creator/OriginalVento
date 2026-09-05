@@ -62,6 +62,19 @@ CREATE TABLE IF NOT EXISTS payments (
     granted_at BIGINT DEFAULT 0
 );
 
+-- Taklif (referral) tizimi
+CREATE TABLE IF NOT EXISTS referrals (
+    user_id BIGINT PRIMARY KEY,
+    referrer_id BIGINT NOT NULL,
+    created_at BIGINT NOT NULL
+);
+
+-- Pending referral bonuslar (referrer hali users qatoriga ega bo'lmasa)
+CREATE TABLE IF NOT EXISTS referral_bonuses (
+    user_id BIGINT PRIMARY KEY,
+    pending_days INTEGER NOT NULL DEFAULT 0
+);
+
 -- Taniqli foydalanuvchilar
 CREATE TABLE IF NOT EXISTS known_users (
     user_id BIGINT PRIMARY KEY,

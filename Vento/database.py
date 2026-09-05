@@ -225,11 +225,20 @@ async def grant_subscription(user_id: int, days: int = 30) -> int:
 
     Idempotent extension rule:
         new_expiry = max(current_expiry, now) + days
+
+    Any pending referral bonus days are consumed here and added on top.
     """
     import time
     now = int(time.time())
     current = await get_user_subscription(user_id)
     base = max(current, now)
+    try:
+        pending_days = await _consume_pending_referral_bonus(user_id)
+    except Exception as e:
+        logger.warning(f"Failed to consume pending referral bonus for {user_id}: {e}")
+        pending_days = 0
+    if pending_days:
+        days = days + pending_days
     new_expiry = base + days * 86400
 
     _user_status_cache.pop(user_id, None)
@@ -295,6 +304,118 @@ async def mark_payment_granted(payment_id: str, granted_expiry: int) -> None:
             (granted_expiry, int(time.time()), payment_id)
         )
         await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Referral system helpers (taklif tizimi)
+# ---------------------------------------------------------------------------
+
+REFERRAL_BONUS_REGISTRATION_DAYS = 1   # referrer bonus when invitee /start's the bot
+REFERRAL_BONUS_PAYMENT_DAYS = 3        # referrer bonus when invitee's payment is approved
+
+
+async def _ensure_referral_tables():
+    """Lazily create referral tables (works on both SQLite and PostgreSQL)."""
+    async with get_db_connection() as db:
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS referrals (
+                user_id BIGINT PRIMARY KEY,
+                referrer_id BIGINT NOT NULL,
+                created_at BIGINT NOT NULL
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS referral_bonuses (
+                user_id BIGINT PRIMARY KEY,
+                pending_days INTEGER NOT NULL DEFAULT 0
+            )
+        ''')
+
+
+async def set_user_referrer(user_id: int, referrer_id: int) -> bool:
+    """Capture who invited this user (deep-link /start ref_<id>).
+
+    Returns True only for a brand-new referral; repeated /start by the same
+    user never re-triggers bonuses.
+    """
+    if not referrer_id or referrer_id <= 0 or referrer_id == user_id:
+        return False
+    await _ensure_referral_tables()
+    import time
+    async with get_db_connection() as db:
+        cur = await db.execute(
+            "INSERT INTO referrals (user_id, referrer_id, created_at) VALUES (?, ?, ?) "
+            "ON CONFLICT (user_id) DO NOTHING",
+            (user_id, referrer_id, int(time.time()))
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def get_referrer(user_id: int):
+    """Return the referrer id for a user, or None."""
+    await _ensure_referral_tables()
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT referrer_id FROM referrals WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def get_referral_count(referrer_id: int) -> int:
+    """How many users this person has invited."""
+    await _ensure_referral_tables()
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM referrals WHERE referrer_id = ?", (referrer_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def apply_referral_bonus(referrer_id: int, days: int) -> bool:
+    """Reward the referrer with extra subscription days.
+
+    If the referrer already has a users row (admin-approved before), the bonus
+    extends their subscription immediately. Otherwise the days are stored as
+    pending and applied automatically on the referrer's next grant_subscription
+    call, so the admin-approval gate is never bypassed.
+    """
+    if not referrer_id or referrer_id <= 0 or days <= 0:
+        return False
+    await _ensure_referral_tables()
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT 1 FROM users WHERE user_id = ?", (referrer_id,)
+        ) as cursor:
+            has_row = await cursor.fetchone()
+    if has_row:
+        await grant_subscription(referrer_id, days)
+        return True
+    async with get_db_connection() as db:
+        await db.execute(
+            "INSERT INTO referral_bonuses (user_id, pending_days) VALUES (?, ?) "
+            "ON CONFLICT (user_id) DO UPDATE SET pending_days = referral_bonuses.pending_days + ?",
+            (referrer_id, days, days)
+        )
+        await db.commit()
+    return True
+
+
+async def _consume_pending_referral_bonus(user_id: int) -> int:
+    """Return and clear the pending referral bonus days for a user."""
+    await _ensure_referral_tables()
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT pending_days FROM referral_bonuses WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row or not row[0]:
+            return 0
+        await db.execute("DELETE FROM referral_bonuses WHERE user_id = ?", (user_id,))
+        await db.commit()
+        return int(row[0])
 
 
 async def get_latest_pending_payment(user_id: int):
