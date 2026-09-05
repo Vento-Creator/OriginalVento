@@ -107,10 +107,11 @@ async def _get_chat_info(client: Client, channel_id: str):
 
 async def check_user_joined(client: Client, user_id: int):
     """('ok', []) — hammasiga a'zo; ('join', missing) — a'zo bo'lish kerak;
-    ('error', []) — tekshiruv amalga oshmadi (bot kanalga kira olmaydi)."""
+    ('error', reason) — tekshiruv amalga oshmadi.
+    reason: 'bot_not_in_channel' (bot kanalga qo'shilmagan/kira olmaydi)."""
     channels = await get_force_channels()
     if not channels:
-        return "ok", []
+        return "ok", [], ""
     missing = []
     for ch in channels:
         try:
@@ -122,14 +123,15 @@ async def check_user_joined(client: Client, user_id: int):
                 missing.append({"id": info["id"], "title": title, "url": info["url"]})
             else:
                 # kanal ma'lumoti ham olinmadi — bot kanalga kira olmayapti
-                return "error", []
+                return "error", [], "bot_not_in_channel"
         except (ChatAdminRequired, ChannelPrivate) as e:
             logger.warning(f"force_join: kanal tekshirilmadi ({ch['id']}): {e}")
-            return "error", []
+            return "error", [], "bot_not_in_channel"
         except Exception as e:
+            # PEER_ID_INVALID va shu kabi: bot kanalni tanimaydi = bot a'zo emas
             logger.warning(f"force_join: tekshiruv xatosi ({ch['id']}): {e}")
-            return "error", []
-    return "ok", missing
+            return "error", [], "bot_not_in_channel"
+    return "ok", missing, ""
 
 
 def _build_screen(missing):
@@ -143,6 +145,25 @@ def _build_screen(missing):
     return "\n".join(lines), buttons
 
 
+def _error_screen_for(user_id: int):
+    """Tekshiruv amalga oshmadi — admin va oddiy userga turli xabar."""
+    try:
+        admin = is_admin(user_id)
+    except Exception:
+        admin = False
+    if admin:
+        text = (
+            "⚠️ **Bot kanalga hali qo'shilmagan!**\n\n"
+            "Tekshirilayotgan kanal(lar)ga bot a'zo emas, shuning uchun obuna "
+            "tekshirilolmayapti.\n\n"
+            "🔧 **Yechim:** Kanalni oching → Botni **admin** sifatida qo'shing → "
+            "shundan so'ng ✅ Tekshirish tugmasini bosing."
+        )
+    else:
+        text = f"❌ **Xatolik!** Admin bilan bog'laning: {ADMIN_CONTACT}"
+    return text
+
+
 async def enforce_force_join(client: Client, message: Message) -> bool:
     """/start gate. True = o'tdi; False = ekrani ko'rsatildi (handler to'xtatsin)."""
     try:
@@ -150,13 +171,13 @@ async def enforce_force_join(client: Client, message: Message) -> bool:
             return True
     except Exception:
         return True  # fail-open
-    status, missing = await check_user_joined(client, message.from_user.id)
+    status, missing, reason = await check_user_joined(client, message.from_user.id)
     if status == "ok":
         return True
     if status == "error":
-        text = f"❌ **Xatolik!** Admin bilan bog'laning: {ADMIN_CONTACT}"
+        text = _error_screen_for(message.from_user.id)
         buttons = None
-        logger.warning("force_join: tekshiruv amalga oshmadi (bot kanalga kira olmaydi)")
+        logger.warning(f"force_join: tekshiruv amalga oshmadi (reason={reason})")
     else:
         text, buttons = _build_screen(missing)
     try:
@@ -178,13 +199,26 @@ async def enforce_force_join(client: Client, message: Message) -> bool:
 @Client.on_callback_query(filters.regex("^fj_check$"))
 async def fj_check_callback(client: Client, cq):
     uid = cq.from_user.id
-    status, missing = await check_user_joined(client, uid)
+    status, missing, reason = await check_user_joined(client, uid)
     if status == "error":
         try:
-            await cq.message.edit_text(f"❌ **Xatolik!** Admin bilan bog'laning: {ADMIN_CONTACT}")
+            await cq.message.edit_text(_error_screen_for(uid))
         except Exception:
             pass
-        await cq.answer("❌ Tekshiruvda xatolik. Admin bilan bog'laning.", show_alert=True)
+        if reason == "bot_not_in_channel":
+            try:
+                admin = is_admin(uid)
+            except Exception:
+                admin = False
+            if admin:
+                await cq.answer(
+                    "⚠️ Bot kanalga qo'shilmagan. Botni kanalga admin qilib qo'shing.",
+                    show_alert=True,
+                )
+            else:
+                await cq.answer("❌ Tekshiruvda xatolik. Admin bilan bog'laning.", show_alert=True)
+        else:
+            await cq.answer("❌ Tekshiruvda xatolik. Admin bilan bog'laning.", show_alert=True)
         return
     if status == "ok":
         try:
@@ -475,17 +509,16 @@ async def handle_admin_add_name_input(client: Client, message: Message):
         )
         return
 
-    # Bot kanalga a'zomi — bo'lmasa ogohlantirish
+    # Bot kanalga a'zomi — bo'lmasa ogohlantirish (har qanday xatoda)
     warning = ""
     try:
         await client.get_chat_member(channel_id, "me")
-    except (UserNotParticipant, ChatAdminRequired, ChannelPrivate):
-        warning = (
-            "\n⚠️ **Diqqat:** Bot hali kanal a'zosi (admini) emas — aks holda "
-            "tekshiruvda xatolik chiqadi. Botni kanalga admin qilib qo'shing."
-        )
     except Exception:
-        pass
+        warning = (
+            "\n⚠️ **Diqqat:** Bot kanalga hali qo'shilmagan yoki kira olmaydi — "
+            "bu holda obuna tekshiruvi ishlamaydi. Botni kanalga **admin** "
+            "sifatida qo'shing, aks holda userlar xatolik xabarini ko'radi."
+        )
 
     try:
         from database import log_admin_action
