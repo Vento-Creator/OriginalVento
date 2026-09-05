@@ -17,11 +17,34 @@ import time
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant, ChatAdminRequired, ChannelPrivate
+from pyrogram.enums import ChatMemberStatus
 
 from feature_flags import get_bot_setting, set_bot_setting
 from config import is_admin, user_states
 
 logger = logging.getLogger(__name__)
+
+
+def _is_member_status(status) -> bool:
+    """Status 'a'zo' hisoblanadimi?
+
+    Muhim: get_chat_member xato chiqarmasdan ham 'left' yoki 'banned' holatini
+    qaytarishi mumkin (kanaldan chiqib ketgan user) — bu holda a'zo EMAS!
+    """
+    if isinstance(status, str):
+        return status in ("creator", "owner", "administrator", "member", "restricted")
+    if status is None:
+        return False
+    # Eski pyrogram 'OWNER' o'rniga 'CREATOR' ishlatadi — ikkalasi ham qo'llansin
+    member_states = {
+        getattr(ChatMemberStatus, "OWNER", None),
+        getattr(ChatMemberStatus, "CREATOR", None),
+        getattr(ChatMemberStatus, "ADMINISTRATOR", None),
+        getattr(ChatMemberStatus, "MEMBER", None),
+        getattr(ChatMemberStatus, "RESTRICTED", None),
+    }
+    member_states.discard(None)
+    return status in member_states
 
 
 def _admin_cb_filter_fn(_, __, query):
@@ -118,25 +141,42 @@ async def check_user_joined(client: Client, user_id: int):
     ('error', [], reason) — tekshiruv amalga oshmadi.
 
     PEER_ID_INVALID muammosiga qarshi: avval ref (@username) orqali peer'ni
-    warm-up qilamiz, keyin get_chat_member'ni qayta urinamiz."""
+    warm-up qilamiz, keyin get_chat_member'ni qayta urinamiz.
+
+    Status tekshiruvi muhim: get_chat_member xato chiqarmasdan 'left'/'banned'
+    statusini qaytarishi mumkin (kanaldan chiqib ketgan user) — a'zo EMAS.
+    """
     channels = await get_force_channels()
     if not channels:
         return "ok", [], ""
     missing = []
+
+    async def _member_check(target) -> bool:
+        """True = a'zo; False = a'zo emas; None = xato/aniqlanmadi."""
+        try:
+            member = await client.get_chat_member(target, user_id)
+        except UserNotParticipant:
+            return False
+        except (ChatAdminRequired, ChannelPrivate) as e:
+            logger.warning(f"force_join: kanal tekshirilmadi ({target}): {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"force_join: tekshiruv xatosi ({target}): {e}")
+            return None
+        # Status 'left'/'banned' bo'lsa ham muvaffaqiyat qaytadi — tekshiramiz!
+        if _is_member_status(getattr(member, "status", None)):
+            return True
+        logger.debug(f"force_join: user {user_id} a'zo emas ({target}), status={getattr(member, 'status', None)}")
+        return False
+
     for ch in channels:
         cid = ch["id"]
         ref = (ch.get("ref") or "").strip()
         probe = ref or cid
-        is_member = False
-        user_missing = False
-        try:
-            await client.get_chat_member(cid, user_id)
-            is_member = True
-        except UserNotParticipant:
-            user_missing = True
-        except Exception as first_err:
-            # Peer cache warm-up: @username/ref orqali resolve, keyin retry.
-            # Retry-da @username ishlatamiz (IDdan ko'ra ishonchli).
+
+        member = await _member_check(cid)
+        if member is None:
+            # Peer cache warm-up: @username/ref orqali resolve, keyin retry
             try:
                 chat = await client.get_chat(probe)
             except Exception as warm_err:
@@ -145,19 +185,14 @@ async def check_user_joined(client: Client, user_id: int):
                 )
                 return "error", [], "bot_not_in_channel"
             retry_id = f"@{chat.username}" if getattr(chat, "username", None) else chat.id
-            try:
-                await client.get_chat_member(retry_id, user_id)
-                is_member = True
-            except UserNotParticipant:
-                user_missing = True
-            except Exception as retry_err:
+            member = await _member_check(retry_id)
+            if member is None:
                 logger.warning(
-                    f"force_join: retry xato ({cid}, retry_id={retry_id}): {retry_err} | "
-                    f"birinchi: {first_err}"
+                    f"force_join: retry xato ({cid}, retry_id={retry_id})"
                 )
                 return "error", [], "bot_not_in_channel"
 
-        if is_member:
+        if member:
             continue
 
         # User a'zo emas — missing ro'yxatga qo'shamiz (maxsus nom ustuvor)
@@ -394,17 +429,20 @@ async def admin_fj_diag_callback(client: Client, cq):
             # 2) Botning o'zi a'zomi (eng muhimi)
             try:
                 m = await client.get_chat_member(chat.id, "me")
-                st = getattr(m, "status", "?")
-                lines.append(f"  ✅ Bot a'zoligi: `{st}`")
-            except UserNotParticipant:
-                lines.append("  ❌ **Bot kanalga a'zo EMAS!**")
+                st = getattr(m, "status", None)
+                lines.append(f"  ✅ Bot a'zoligi: `{st}`"
+                             if _is_member_status(st)
+                             else f"  ❌ Bot a'zosi EMAS! status=`{st}`")
             except Exception as e:
                 lines.append(f"  ❌ Bot a'zoligi: **{type(e).__name__}**: {e}")
 
-            # 3) Siz (admin) a'zomi
+            # 3) Siz (admin) a'zomi — ham exception, ham 'left' statusini tekshiramiz
             try:
-                await client.get_chat_member(chat.id, cq.from_user.id)
-                lines.append("  ✅ Siz a'zosiz")
+                m = await client.get_chat_member(chat.id, cq.from_user.id)
+                st = getattr(m, "status", None)
+                lines.append(f"  ✅ Siz a'zosiz (`{st}`)"
+                             if _is_member_status(st)
+                             else f"  ❌ Siz a'zo emassiz! status=`{st}`")
             except UserNotParticipant:
                 lines.append("  ❌ Siz a'zo emassiz")
             except Exception as e:
