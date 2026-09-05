@@ -418,6 +418,132 @@ async def _consume_pending_referral_bonus(user_id: int) -> int:
         return int(row[0])
 
 
+async def _get_user_display(user_id: int):
+    """(username, first_name) — known_users, keyin users jadvalidan qidiradi."""
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT username, first_name FROM known_users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row and (row[0] or row[1]):
+            return row[0], row[1]
+        async with db.execute(
+            "SELECT username, first_name FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return (row[0], row[1]) if row else (None, None)
+
+
+async def get_referral_overview() -> dict:
+    """Umumiy referral statistikasi (admin dashboard uchun).
+
+    converted = obuna olgan takliflar (granted payment YOKI faol obuna).
+    """
+    await _ensure_referral_tables()
+    import time
+    now = int(time.time())
+    async with get_db_connection() as db:
+        async with db.execute("SELECT COUNT(*) FROM referrals") as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+        async with db.execute("SELECT COUNT(DISTINCT referrer_id) FROM referrals") as cursor:
+            row = await cursor.fetchone()
+            referrers = row[0] if row else 0
+        async with db.execute("""
+            SELECT COUNT(*) FROM referrals r
+            WHERE EXISTS (
+                SELECT 1 FROM payments p
+                WHERE p.user_id = r.user_id AND p.grant_status = 'granted'
+            ) OR EXISTS (
+                SELECT 1 FROM users u
+                WHERE u.user_id = r.user_id AND u.expiry_date > ?
+            )
+        """, (now,)) as cursor:
+            row = await cursor.fetchone()
+            converted = row[0] if row else 0
+    pct = round(converted * 100.0 / total, 1) if total else 0.0
+    return {
+        "total_referred": total,
+        "distinct_referrers": referrers,
+        "converted": converted,
+        "conversion_pct": pct,
+    }
+
+
+async def get_top_referrers(limit: int = 10):
+    """Eng ko'p taklif qilgan foydalanuvchilar (leaderboard).
+
+    Har bir yozuv: referrer_id, username, first_name, invited, paid.
+    """
+    await _ensure_referral_tables()
+    import time
+    now = int(time.time())
+    async with get_db_connection() as db:
+        async with db.execute("""
+            SELECT r.referrer_id,
+                   COUNT(*) AS invited,
+                   SUM(CASE WHEN EXISTS (
+                       SELECT 1 FROM payments p
+                       WHERE p.user_id = r.user_id AND p.grant_status = 'granted'
+                   ) OR EXISTS (
+                       SELECT 1 FROM users u
+                       WHERE u.user_id = r.user_id AND u.expiry_date > ?
+                   ) THEN 1 ELSE 0 END) AS paid
+            FROM referrals r
+            GROUP BY r.referrer_id
+            ORDER BY invited DESC, paid DESC
+            LIMIT ?
+        """, (now, limit)) as cursor:
+            rows = await cursor.fetchall()
+    result = []
+    for r in rows:
+        username, first_name = await _get_user_display(r[0])
+        result.append({
+            "referrer_id": r[0],
+            "username": username,
+            "first_name": first_name,
+            "invited": r[1],
+            "paid": int(r[2] or 0),
+        })
+    return result
+
+
+async def get_referral_invitees(referrer_id: int, limit: int = 30):
+    """Bu foydalanuvchi kimlarni taklif qilgan + har birining holati."""
+    await _ensure_referral_tables()
+    import time
+    now = int(time.time())
+    async with get_db_connection() as db:
+        async with db.execute("""
+            SELECT r.user_id, r.created_at,
+                   EXISTS (
+                       SELECT 1 FROM payments p
+                       WHERE p.user_id = r.user_id AND p.grant_status = 'granted'
+                   ),
+                   EXISTS (
+                       SELECT 1 FROM users u
+                       WHERE u.user_id = r.user_id AND u.expiry_date > ?
+                   )
+            FROM referrals r
+            WHERE r.referrer_id = ?
+            ORDER BY r.created_at DESC
+            LIMIT ?
+        """, (now, referrer_id, limit)) as cursor:
+            rows = await cursor.fetchall()
+    result = []
+    for r in rows:
+        username, first_name = await _get_user_display(r[0])
+        result.append({
+            "user_id": r[0],
+            "created_at": r[1],
+            "payment_granted": bool(r[2]),
+            "has_active_sub": bool(r[3]),
+            "username": username,
+            "first_name": first_name,
+        })
+    return result
+
+
 async def get_latest_pending_payment(user_id: int):
     """Return the most recent pending (unprocessed) payment for a user, or None."""
     async with get_db_connection() as db:

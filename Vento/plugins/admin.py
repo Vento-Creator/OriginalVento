@@ -62,6 +62,7 @@ async def admin_command_handler(client: Client, message: Message):
         [InlineKeyboardButton(get_text("search_user", lang), callback_data="adm_search")],
         [InlineKeyboardButton(get_text("recent_actions", lang), callback_data="adm_acts_list_0")],
         [InlineKeyboardButton(get_text("statistics", lang), callback_data="admin_stats")],
+        [InlineKeyboardButton("👥 Referral", callback_data="admin_referrals")],
         [InlineKeyboardButton(get_text("subscribed_users", lang), callback_data="admin_sub_list")],
         [InlineKeyboardButton(get_text("free_users_list", lang), callback_data="admin_free_list")],
         [InlineKeyboardButton(get_text("banned_list", lang), callback_data="adm_bans")],
@@ -112,6 +113,7 @@ async def admin_panel_callback(client: Client, cq: CallbackQuery):
         [InlineKeyboardButton(get_text("search_user", lang), callback_data="adm_search")],
         [InlineKeyboardButton(get_text("recent_actions", lang), callback_data="adm_acts_list_0")],
         [InlineKeyboardButton(get_text("statistics", lang), callback_data="admin_stats")],
+        [InlineKeyboardButton("👥 Referral", callback_data="admin_referrals")],
         [InlineKeyboardButton(get_text("subscribed_users", lang), callback_data="admin_sub_list")],
         [InlineKeyboardButton(get_text("free_users_list", lang), callback_data="admin_free_list")],
         [InlineKeyboardButton(get_text("banned_list", lang), callback_data="adm_bans")],
@@ -2065,3 +2067,89 @@ async def admin_task_terminate_ban_callback(client: Client, cq: CallbackQuery):
     
     cq.data = "admin_active_tasks_0"
     await admin_active_tasks_callback(client, cq)
+
+
+# ---------------------------------------------------------------------------
+# Referral statistikasi (admin dashboard)
+# ---------------------------------------------------------------------------
+
+@Client.on_callback_query(filters.regex("^admin_referrals$") & is_admin_callback_filter)
+async def admin_referrals_callback(client: Client, cq: CallbackQuery):
+    """Admin referral dashboardi: umumiy statistika + top taklifchilar."""
+    if not await can_manage_users(cq.from_user.id):
+        await cq.answer("❌ Foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
+        return
+
+    from database import get_referral_overview, get_top_referrers
+
+    overview = await get_referral_overview()
+    top = await get_top_referrers(10)
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [
+        "👥 **Referral Statistikasi**\n",
+        f"🔗 Jami taklif qilinganlar: **{overview['total_referred']}** ta",
+        f"👤 Taklif qilgan foydalanuvchilar: **{overview['distinct_referrers']}** ta",
+        f"💎 Obuna olgan takliflar: **{overview['converted']}** ta ({overview['conversion_pct']}%)",
+    ]
+    buttons = []
+    if top:
+        lines.append("\n🏆 **Eng ko'p taklif qilganlar:**")
+        for i, t in enumerate(top):
+            medal = medals[i] if i < len(medals) else f"{i + 1}."
+            name = f"@{t['username']}" if t['username'] else (t['first_name'] or str(t['referrer_id']))
+            lines.append(f"{medal} {name} — {t['invited']} ta taklif, {t['paid']} ta obuna")
+            buttons.append([InlineKeyboardButton(
+                f"📋 {name} ({t['invited']})",
+                callback_data=f"admin_ref_detail_{t['referrer_id']}",
+            )])
+    else:
+        lines.append("\n📭 Hozircha hech kim taklif qilmagan.")
+
+    buttons.append([InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")])
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^admin_ref_detail_(\d+)$") & is_admin_callback_filter)
+async def admin_ref_detail_callback(client: Client, cq: CallbackQuery):
+    """Bir referrer'ning taklif qilganlari ro'yxati (kim kimni, holati bilan)."""
+    if not await can_manage_users(cq.from_user.id):
+        await cq.answer("❌ Foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
+        return
+
+    from database import get_referral_invitees, _get_user_display
+
+    referrer_id = int(cq.matches[0].group(1))
+    invitees = await get_referral_invitees(referrer_id, 30)
+    r_username, r_first_name = await _get_user_display(referrer_id)
+    referrer_label = f"@{r_username}" if r_username else (r_first_name or str(referrer_id))
+
+    lines = [f"👥 **{referrer_label}** (`{referrer_id}`) — taklif qilganlari: **{len(invitees)}** ta\n"]
+
+    converted = 0
+    if invitees:
+        for inv in invitees:
+            uname = f"@{inv['username']}" if inv['username'] else (inv['first_name'] or str(inv['user_id']))
+            has_sub = inv['payment_granted'] or inv['has_active_sub']
+            if has_sub:
+                converted += 1
+            status = "💎 Obuna" if has_sub else "⏳ Obunasiz"
+            try:
+                date_str = datetime.fromtimestamp(inv['created_at']).strftime("%d.%m.%Y")
+            except Exception:
+                date_str = "?"
+            lines.append(f"• {uname} (`{inv['user_id']}`) — {status} — {date_str}")
+        pct = round(converted * 100.0 / len(invitees), 1)
+        lines.append(f"\n💎 Konversiya: **{converted}/{len(invitees)}** ({pct}%)")
+    else:
+        lines.append("\n📭 Taklif qilinganlar topilmadi.")
+
+    buttons = [
+        [InlineKeyboardButton("🔙 Referral statistika", callback_data="admin_referrals")],
+        [InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")],
+    ]
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await cq.answer()

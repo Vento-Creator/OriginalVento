@@ -200,6 +200,19 @@ async def successful_payment_handler(client: Client, message: Message):
 
     # 2. Ask admins to approve (grant subscription) or reject (refund)
     uname = f"@{message.from_user.username}" if message.from_user.username else "yo'q"
+
+    # Referral info: admin tasdiqlashda kim taklif qilganini ko'rsatish
+    referrer_line = ""
+    try:
+        from database import get_referrer, _get_user_display
+        referrer_id = await get_referrer(user_id)
+        if referrer_id:
+            r_username, r_first_name = await _get_user_display(referrer_id)
+            r_label = f"@{r_username}" if r_username else (r_first_name or str(referrer_id))
+            referrer_line = f"👥 Taklif qilgan: {r_label} ([`{referrer_id}`])\n"
+    except Exception as e:
+        logger.warning(f"Failed to resolve referrer for payment card {user_id}: {e}")
+
     admin_kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"payok_{user_id}"),
@@ -210,6 +223,7 @@ async def successful_payment_handler(client: Client, message: Message):
         "💰 **Yangi to'lov — tasdiqlash kutilmoqda!**\n\n"
         f"Foydalanuvchi: {message.from_user.mention} ([`{user_id}`])\n"
         f"Username: {uname}\n"
+        f"{referrer_line}"
         f"Miqdor: **{sp.total_amount} {sp.currency}**\n"
         f"Tranzaksiya ID: `{charge_id}`\n\n"
         "✅ Tasdiqlangach 30 kunlik obuna faollashadi.\n"
