@@ -171,6 +171,18 @@ async def start_handler(client: Client, message: Message):
         except Exception as e:
             logger.warning(f"Referral capture failed for {uid}: {e}")
 
+        # MAJBURIY KANAL OBUNASI GATE - har qanday /start da, login/approvaldan oldin
+        # Force join yoqilgan bo'lsa, user kanal(lar)ga a'zo bo'lmaguncha
+        # keyingi oqimga (login, menyu, h.k.) o'tkazilmaydi.
+        try:
+            from plugins.force_join import enforce_force_join
+            if not await enforce_force_join(client, message):
+                logger.info("[START_TRACE] STEP2b: Force join gate blocked, returning")
+                # user_states'ni tozalamaymiz — user kanalga a'zo bo'lib qaytganda ochiq ekrandan davom etadi
+                return
+        except Exception as e:
+            logger.warning(f"Force join gate failed for {uid}: {e}. Proceeding without it.")
+
         # MANDATORY: Database-driven authentication check - MUST be first check
         # DB is_active is the ONLY source of truth for authentication status
         # Disk .session files MUST NEVER determine authentication state
@@ -334,11 +346,7 @@ async def start_handler(client: Client, message: Message):
             return
 
         logger.info("[START_TRACE] STEP29: About to call get_main_keyboard")
-        # Majburiy kanal obunasi tekshiruvi (yoqilgan bo'lsa)
-        from plugins.force_join import enforce_force_join
-        if not await enforce_force_join(client, message):
-            logger.info("[START_TRACE] STEP29a: Force join screen shown, returning")
-            return
+        # (force join gate STEP2b da bajarilgan — bu yerda qayta tekshirish shart emas)
         kb = await get_main_keyboard(uid)
         logger.info("[START_TRACE] STEP30: get_main_keyboard done")
         logger.info("[START_TRACE] STEP31: About to send final welcome message")
