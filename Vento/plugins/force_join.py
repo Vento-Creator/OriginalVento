@@ -135,22 +135,25 @@ async def check_user_joined(client: Client, user_id: int):
         except UserNotParticipant:
             user_missing = True
         except Exception as first_err:
-            # Peer cache warm-up: @username/ref orqali resolve, keyin retry
+            # Peer cache warm-up: @username/ref orqali resolve, keyin retry.
+            # Retry-da @username ishlatamiz (IDdan ko'ra ishonchli).
             try:
-                await client.get_chat(probe)
+                chat = await client.get_chat(probe)
             except Exception as warm_err:
                 logger.warning(
                     f"force_join: kanal aniqlanmadi ({cid}, probe={probe}): {warm_err}"
                 )
                 return "error", [], "bot_not_in_channel"
+            retry_id = f"@{chat.username}" if getattr(chat, "username", None) else chat.id
             try:
-                await client.get_chat_member(cid, user_id)
+                await client.get_chat_member(retry_id, user_id)
                 is_member = True
             except UserNotParticipant:
                 user_missing = True
             except Exception as retry_err:
                 logger.warning(
-                    f"force_join: retry xato ({cid}): {retry_err} | birinchi: {first_err}"
+                    f"force_join: retry xato ({cid}, retry_id={retry_id}): {retry_err} | "
+                    f"birinchi: {first_err}"
                 )
                 return "error", [], "bot_not_in_channel"
 
@@ -308,10 +311,21 @@ async def admin_force_join_callback(client: Client, cq):
     channels = await get_force_channels()
     status_label = "🟢 Yoqilgan" if enabled else "🔴 O'chirilgan"
 
+    # Bot identity — qaysi akkaunt tekshiruvni bajarishi aniq ko'rinsin
+    bot_line = ""
+    try:
+        me = await client.get_me()
+        if me:
+            bot_label = f"@{me.username}" if me.username else str(me.id)
+            bot_line = f"\n🤖 Tekshiruvchi bot: {bot_label} (`{me.id}`)\n"
+    except Exception as e:
+        logger.warning(f"force_join: get_me xato: {e}")
+
     lines = [
         "📢 **Majburiy kanal obunasi**\n",
         f"⚙️ Holati: {status_label}",
-        f"📋 Kanallar: **{len(channels)}** ta\n",
+        f"📋 Kanallar: **{len(channels)}** ta",
+        bot_line,
     ]
     if channels:
         for i, ch in enumerate(channels, 1):
@@ -331,7 +345,10 @@ async def admin_force_join_callback(client: Client, cq):
             "🔴 O'chirish" if enabled else "🟢 Yoqish",
             callback_data="admin_fj_toggle",
         )],
-        [InlineKeyboardButton("➕ Kanal qo'shish", callback_data="admin_fj_add")],
+        [
+            InlineKeyboardButton("➕ Kanal qo'shish", callback_data="admin_fj_add"),
+            InlineKeyboardButton("🔍 Diagnostika", callback_data="admin_fj_diag"),
+        ],
     ]
     for i, ch in enumerate(channels):
         info = await _get_chat_info(client, ch["id"])
@@ -344,6 +361,61 @@ async def admin_force_join_callback(client: Client, cq):
         reply_markup=InlineKeyboardMarkup(buttons),
         disable_web_page_preview=True,
     )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^admin_fj_diag$") & _admin_cb_filter)
+async def admin_fj_diag_callback(client: Client, cq):
+    """Har bir kanal bo'yicha aniq diagnostika: get_chat, bot a'zoligi, user a'zoligi."""
+    if not await _admin_perm_check(cq):
+        return
+
+    channels = await get_force_channels()
+    lines = ["🔍 **Majburiy obuna diagnostikasi**\n"]
+    if not channels:
+        lines.append("📭 Kanallar qo'shilmagan.")
+    else:
+        for ch in channels:
+            cid = ch["id"]
+            ref = (ch.get("ref") or "").strip()
+            probe = ref or cid
+            lines.append(f"📌 Kanal: `{cid}`  (resolve: `{probe}`)")
+
+            # 1) get_chat — bot kanalni umuman topa oladimi
+            try:
+                chat = await client.get_chat(probe)
+                tname = f"@{chat.username}" if getattr(chat, "username", None) else "username yo'q"
+                lines.append(f"  ✅ get_chat: {chat.title or cid} ({tname})")
+            except Exception as e:
+                lines.append(f"  ❌ get_chat: **{type(e).__name__}**: {e}")
+                lines.append("")
+                continue
+
+            # 2) Botning o'zi a'zomi (eng muhimi)
+            try:
+                m = await client.get_chat_member(chat.id, "me")
+                st = getattr(m, "status", "?")
+                lines.append(f"  ✅ Bot a'zoligi: `{st}`")
+            except UserNotParticipant:
+                lines.append("  ❌ **Bot kanalga a'zo EMAS!**")
+            except Exception as e:
+                lines.append(f"  ❌ Bot a'zoligi: **{type(e).__name__}**: {e}")
+
+            # 3) Siz (admin) a'zomi
+            try:
+                await client.get_chat_member(chat.id, cq.from_user.id)
+                lines.append("  ✅ Siz a'zosiz")
+            except UserNotParticipant:
+                lines.append("  ❌ Siz a'zo emassiz")
+            except Exception as e:
+                lines.append(f"  ⚠️ Sizni tekshirish: {type(e).__name__}: {e}")
+            lines.append("")
+
+    lines.append("💡 Bot 'a'zo emas' deyapti bo'lsa — WEB logdagi bot akkauntini "
+                 "kanalga admin qilib qo'shing.")
+    buttons = [[InlineKeyboardButton("🔙 Orqaga", callback_data="admin_force_join")]]
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
     await cq.answer()
 
 
