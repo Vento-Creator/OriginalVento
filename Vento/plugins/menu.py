@@ -63,7 +63,7 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
             rows.append([KeyboardButton("📣 Yangiliklar")])
     elif sess:
         rows = [
-            [KeyboardButton("⭐️ Obuna sotib olish")],
+            [KeyboardButton("⭐️ Obuna sotib olish"), KeyboardButton("👥 Takliflar")],
             [KeyboardButton("👤 Akkaunt")],
             [KeyboardButton("📣 Yangiliklar")],
             [KeyboardButton("🌐 Til")],
@@ -71,7 +71,7 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
     else:
         rows = [
             [KeyboardButton("📱 Akkaunt ulash")],
-            [KeyboardButton("⭐️ Obuna haqida")],
+            [KeyboardButton("⭐️ Obuna haqida"), KeyboardButton("👥 Takliflar")],
         ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 

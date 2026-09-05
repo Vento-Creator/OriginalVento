@@ -60,6 +60,9 @@ async def handle_referral_menu(client: Client, message: Message):
         "🎁 **Bonuslar:**\n"
         f"• Har bir yangi taklif uchun: **+{REFERRAL_BONUS_REGISTRATION_DAYS} kun**\n"
         f"• Taklif qilgan do'stingiz obuna sotib olsa: **+{REFERRAL_BONUS_PAYMENT_DAYS} kun**\n\n"
+        "⏳ Eslatma: bonus kunlar akkaunt admin tasdiqlashidan o'tgach qo'shiladi — "
+        "hali tasdiqlanmagan bo'lsangiz, bonuslar zaxirada saqlanadi va tasdiqlangach "
+        "avtomatik hisobingizga yoziladi.\n\n"
         "💡 Havolani do'stlaringizga yuboring — ular botga kirganda siz avtomatik taqdirlanasiz!"
     )
 
