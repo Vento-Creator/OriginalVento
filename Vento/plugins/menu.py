@@ -32,6 +32,13 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
     acc  = await _has_access(uid)
     adm  = _is_admin(uid)
 
+    # Referral tizimi admin tomonidan o'chirilgan bo'lsa tugma ko'rinmaydi
+    try:
+        from feature_flags import is_referral_enabled
+        referral_on = await is_referral_enabled()
+    except Exception:
+        referral_on = True
+
     if sess and acc:
         has_paid_sub = (await get_user_subscription(uid)) > 0
         is_free = await is_free_user(uid)
@@ -46,10 +53,16 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
         else:
             rows.append([KeyboardButton("🌐 Til")])
         if is_free and not has_paid_sub and not adm:
-            rows.append([KeyboardButton("⭐️ Obuna sotib olish"), KeyboardButton("👥 Takliflar")])
+            sub_row = [KeyboardButton("⭐️ Obuna sotib olish")]
+            if referral_on:
+                sub_row.append(KeyboardButton("👥 Takliflar"))
+            rows.append(sub_row)
             rows.append([KeyboardButton("👤 Akkaunt")])
         else:
-            rows.append([KeyboardButton("👥 Takliflar"), KeyboardButton("👤 Akkaunt")])
+            acc_row = [KeyboardButton("👤 Akkaunt")]
+            if referral_on:
+                acc_row.insert(0, KeyboardButton("👥 Takliflar"))
+            rows.append(acc_row)
         
         if not adm:
             rows.append([KeyboardButton("📞 Bog'lanish")])
@@ -62,16 +75,22 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
         else:
             rows.append([KeyboardButton("📣 Yangiliklar")])
     elif sess:
+        sub_row = [KeyboardButton("⭐️ Obuna sotib olish")]
+        if referral_on:
+            sub_row.append(KeyboardButton("👥 Takliflar"))
         rows = [
-            [KeyboardButton("⭐️ Obuna sotib olish"), KeyboardButton("👥 Takliflar")],
+            sub_row,
             [KeyboardButton("👤 Akkaunt")],
             [KeyboardButton("📣 Yangiliklar")],
             [KeyboardButton("🌐 Til")],
         ]
     else:
+        obuna_row = [KeyboardButton("⭐️ Obuna haqida")]
+        if referral_on:
+            obuna_row.append(KeyboardButton("👥 Takliflar"))
         rows = [
             [KeyboardButton("📱 Akkaunt ulash")],
-            [KeyboardButton("⭐️ Obuna haqida"), KeyboardButton("👥 Takliflar")],
+            obuna_row,
         ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
@@ -127,22 +146,28 @@ async def start_handler(client: Client, message: Message):
         # Runs before auth checks so the invite is recorded even when the
         # invitee is still unauthenticated / pending approval.
         try:
-            parts = (message.text or "").split()
-            if len(parts) > 1 and parts[1].startswith("ref_") and parts[1][4:].isdigit():
-                ref_id = int(parts[1][4:])
-                if ref_id and ref_id != uid:
-                    from database import set_user_referrer, apply_referral_bonus, REFERRAL_BONUS_REGISTRATION_DAYS
-                    if await set_user_referrer(uid, ref_id):
-                        if await apply_referral_bonus(ref_id, REFERRAL_BONUS_REGISTRATION_DAYS):
-                            try:
-                                await client.send_message(
-                                    ref_id,
-                                    f"🎉 **Yangi taklif!**\n\n"
-                                    f"{message.from_user.mention} sizning havolangiz orqali botga qo'shildi.\n"
-                                    f"🎁 Sizga +{REFERRAL_BONUS_REGISTRATION_DAYS} kun obuna berildi!",
-                                )
-                            except Exception:
-                                pass
+            from feature_flags import is_referral_enabled
+            referral_on = await is_referral_enabled()
+        except Exception:
+            referral_on = True
+        try:
+            if referral_on:
+                parts = (message.text or "").split()
+                if len(parts) > 1 and parts[1].startswith("ref_") and parts[1][4:].isdigit():
+                    ref_id = int(parts[1][4:])
+                    if ref_id and ref_id != uid:
+                        from database import set_user_referrer, apply_referral_bonus, REFERRAL_BONUS_REGISTRATION_DAYS
+                        if await set_user_referrer(uid, ref_id):
+                            if await apply_referral_bonus(ref_id, REFERRAL_BONUS_REGISTRATION_DAYS):
+                                try:
+                                    await client.send_message(
+                                        ref_id,
+                                        f"🎉 **Yangi taklif!**\n\n"
+                                        f"{message.from_user.mention} sizning havolangiz orqali botga qo'shildi.\n"
+                                        f"🎁 Sizga +{REFERRAL_BONUS_REGISTRATION_DAYS} kun obuna berildi!",
+                                    )
+                                except Exception:
+                                    pass
         except Exception as e:
             logger.warning(f"Referral capture failed for {uid}: {e}")
 

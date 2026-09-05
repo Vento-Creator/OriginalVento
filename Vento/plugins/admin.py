@@ -2081,18 +2081,27 @@ async def admin_referrals_callback(client: Client, cq: CallbackQuery):
         return
 
     from database import get_referral_overview, get_top_referrers
+    from feature_flags import is_referral_enabled
 
+    enabled = await is_referral_enabled()
     overview = await get_referral_overview()
     top = await get_top_referrers(10)
 
+    status_label = "🟢 Yoqilgan" if enabled else "🔴 O'chirilgan"
     medals = ["🥇", "🥈", "🥉"]
     lines = [
         "👥 **Referral Statistikasi**\n",
+        f"⚙️ Holati: {status_label}",
         f"🔗 Jami taklif qilinganlar: **{overview['total_referred']}** ta",
         f"👤 Taklif qilgan foydalanuvchilar: **{overview['distinct_referrers']}** ta",
         f"💎 Obuna olgan takliflar: **{overview['converted']}** ta ({overview['conversion_pct']}%)",
     ]
-    buttons = []
+    buttons = [
+        [InlineKeyboardButton(
+            "🔴 O'chirish" if enabled else "🟢 Yoqish",
+            callback_data="admin_ref_toggle",
+        )]
+    ]
     if top:
         lines.append("\n🏆 **Eng ko'p taklif qilganlar:**")
         for i, t in enumerate(top):
@@ -2153,3 +2162,28 @@ async def admin_ref_detail_callback(client: Client, cq: CallbackQuery):
 
     await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
     await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^admin_ref_toggle$") & is_admin_callback_filter)
+async def admin_ref_toggle_callback(client: Client, cq: CallbackQuery):
+    """Referral tizimini yoqish/o'chirish (bot_settings orqali, butun bot uchun)."""
+    if not await can_manage_users(cq.from_user.id):
+        await cq.answer("❌ Foydalanuvchilarni boshqarish huquqi yo'q!", show_alert=True)
+        return
+
+    from feature_flags import is_referral_enabled, set_bot_setting
+
+    enabled = await is_referral_enabled()
+    if not await set_bot_setting("referral_enabled", "0" if enabled else "1"):
+        await cq.answer("❌ Sozlama saqlashda xatolik. Qaytadan urinib ko'ring.", show_alert=True)
+        return
+
+    try:
+        from database import log_admin_action
+        await log_admin_action(cq.from_user.id, "referral_toggle", None, f"enabled={not enabled}")
+    except Exception:
+        pass
+
+    await cq.answer("✅ Taklif tizimi yoqildi" if not enabled else "🔴 Taklif tizimi o'chirildi")
+    cq.data = "admin_referrals"
+    await admin_referrals_callback(client, cq)

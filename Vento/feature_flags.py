@@ -217,6 +217,67 @@ async def get_global_features() -> Dict[str, bool]:
             flags[feature] = str(row["value"]) == "1"
     return flags
 
+# ------------------------- Umumiy bot sozlamalari -------------------------
+
+# Admin panel'dan boshqariladigan umumiy sozlamalar (key -> default):
+#   referral_enabled   — taklif tizimi yoqilganmi ("1"/"0")
+# Kelgusi: sub_price_stars, force_channels (JSON), ...
+_SETTING_DEFAULTS: Dict[str, str] = {
+    "referral_enabled": "1",
+}
+
+_setting_cache: Dict[str, Tuple[str, float]] = {}
+SETTING_CACHE_TTL = 30.0
+
+
+async def get_bot_setting(key: str, default: Optional[str] = None) -> str:
+    """bot_settings'dan string qiymat o'qiydi (kesh bilan).
+
+    Yozuv yo'q bo'lsa _SETTING_DEFAULTS (yoki berilgan default) qaytadi.
+    DB xatosida default qaytadi (fail-open).
+    """
+    if default is None:
+        default = _SETTING_DEFAULTS.get(key, "")
+    now = time.time()
+    cached = _setting_cache.get(key)
+    if cached and now - cached[1] < SETTING_CACHE_TTL:
+        return cached[0]
+    try:
+        await _ensure_tables()
+        async with get_db_connection() as db:
+            row = await db.fetchrow(
+                "SELECT value FROM bot_settings WHERE key = $1",
+                key,
+            )
+    except Exception as e:
+        logger.error(f"feature_flags: sozlama o'qilmadi ({key}): {e}")
+        return default
+    value = str(row["value"]) if row is not None and row["value"] is not None else default
+    _setting_cache[key] = (value, now)
+    return value
+
+
+async def set_bot_setting(key: str, value: str) -> bool:
+    """bot_settings'ga string qiymat yozadi (kesh darhol tozalanadi)."""
+    try:
+        await _ensure_tables()
+        async with get_db_connection() as db:
+            await db.execute('''
+                INSERT INTO bot_settings (key, value) VALUES ($1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = $2
+            ''', key, str(value))
+    except Exception as e:
+        logger.error(f"feature_flags: sozlama yozilmadi ({key}): {e}")
+        return False
+    _setting_cache.pop(key, None)  # darhol kuchga kirsin
+    return True
+
+
+async def is_referral_enabled() -> bool:
+    """Taklif tizimi yoqilganmi? (default: yoq)"""
+    return (await get_bot_setting("referral_enabled")) != "0"
+
+
 # ------------------------- Boshqaruv ruxsatnomasi -------------------------
 
 def is_owner(user_id: int) -> bool:

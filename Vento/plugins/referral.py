@@ -22,6 +22,11 @@ async def handle_referral_menu(client: Client, message: Message):
     """'👥 Takliflar' tugmasi bosilganda referral ekranni ko'rsatish."""
     uid = message.from_user.id
 
+    from feature_flags import is_referral_enabled
+    if not await is_referral_enabled():
+        await message.reply_text("🚫 **Taklif tizimi hozircha o'chirilgan.**")
+        return
+
     from database import (
         get_referral_count,
         REFERRAL_BONUS_REGISTRATION_DAYS,

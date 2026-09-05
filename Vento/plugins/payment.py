@@ -310,7 +310,10 @@ async def payment_approve_callback(client: Client, cq: CallbackQuery):
 
     # Referral bonus: reward the inviter when the referred user's payment is approved
     try:
+        from feature_flags import is_referral_enabled
         from database import get_referrer, apply_referral_bonus, REFERRAL_BONUS_PAYMENT_DAYS
+        if not await is_referral_enabled():
+            return
         referrer_id = await get_referrer(target_id)
         if referrer_id and await apply_referral_bonus(referrer_id, REFERRAL_BONUS_PAYMENT_DAYS):
             try:
