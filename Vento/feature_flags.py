@@ -157,7 +157,7 @@ async def set_user_feature(user_id: int, feature: str, enabled: bool) -> bool:
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (user_id, feature)
                 DO UPDATE SET enabled = $3, updated_at = $4
-            ''', user_id, feature, 1 if enabled else 0, int(time.time()))
+            ''', (user_id, feature, 1 if enabled else 0, int(time.time())))
     except Exception as e:
         logger.error(f"feature_flags: user flag yozilmadi ({user_id}/{feature}): {e}")
         return False
@@ -172,7 +172,7 @@ async def set_global_feature(feature: str, enabled: bool) -> bool:
             await db.execute('''
                 INSERT INTO bot_settings (key, value) VALUES ($1, $2)
                 ON CONFLICT (key) DO UPDATE SET value = $2
-            ''', _global_settings_key(feature), "1" if enabled else "0")
+            ''', (_global_settings_key(feature), "1" if enabled else "0"))
     except Exception as e:
         logger.error(f"feature_flags: global flag yozilmadi ({feature}): {e}")
         return False
@@ -267,7 +267,7 @@ async def set_bot_setting(key: str, value: str) -> bool:
             await db.execute('''
                 INSERT INTO bot_settings (key, value) VALUES ($1, $2)
                 ON CONFLICT (key) DO UPDATE SET value = $2
-            ''', key, str(value))
+            ''', (key, str(value)))
     except Exception as e:
         logger.error(f"feature_flags: sozlama yozilmadi ({key}): {e}")
         return False
@@ -325,7 +325,7 @@ async def set_feature_manager(user_id: int, allowed: bool) -> bool:
             await db.execute('''
                 INSERT INTO bot_settings (key, value) VALUES ($1, $2)
                 ON CONFLICT (key) DO UPDATE SET value = $2
-            ''', _manager_key(user_id), "1" if allowed else "0")
+            ''', (_manager_key(user_id), "1" if allowed else "0"))
     except Exception as e:
         logger.error(f"feature_flags: manager ruxsat yozilmadi ({user_id}): {e}")
         return False
