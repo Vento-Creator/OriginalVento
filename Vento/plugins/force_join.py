@@ -57,15 +57,23 @@ async def get_force_channels() -> list:
     result = []
     for c in data:
         if isinstance(c, dict) and str(c.get("id", "")).strip():
-            result.append({"id": str(c["id"]), "name": str(c.get("name") or "").strip()})
+            result.append({
+                "id": str(c["id"]),
+                "name": str(c.get("name") or "").strip(),
+                "ref": str(c.get("ref") or "").strip(),
+            })
         elif str(c).strip():
-            result.append({"id": str(c), "name": ""})
+            result.append({"id": str(c), "name": "", "ref": ""})
     return result
 
 
 async def set_force_channels(channels: list) -> bool:
     cleaned = [
-        {"id": str(c["id"]), "name": str(c.get("name") or "").strip()}
+        {
+            "id": str(c["id"]),
+            "name": str(c.get("name") or "").strip(),
+            "ref": str(c.get("ref") or "").strip(),
+        }
         for c in channels
         if str(c.get("id", "")).strip()
     ]
@@ -106,31 +114,63 @@ async def _get_chat_info(client: Client, channel_id: str):
 # ------------------------- Tekshiruv -------------------------
 
 async def check_user_joined(client: Client, user_id: int):
-    """('ok', []) — hammasiga a'zo; ('join', missing) — a'zo bo'lish kerak;
-    ('error', reason) — tekshiruv amalga oshmadi.
-    reason: 'bot_not_in_channel' (bot kanalga qo'shilmagan/kira olmaydi)."""
+    """('ok', [], '') — hammasiga a'zo; ('join', missing, '') — a'zo bo'lish kerak;
+    ('error', [], reason) — tekshiruv amalga oshmadi.
+
+    PEER_ID_INVALID muammosiga qarshi: avval ref (@username) orqali peer'ni
+    warm-up qilamiz, keyin get_chat_member'ni qayta urinamiz."""
     channels = await get_force_channels()
     if not channels:
         return "ok", [], ""
     missing = []
     for ch in channels:
+        cid = ch["id"]
+        ref = (ch.get("ref") or "").strip()
+        probe = ref or cid
+        is_member = False
+        user_missing = False
         try:
-            await client.get_chat_member(ch["id"], user_id)
+            await client.get_chat_member(cid, user_id)
+            is_member = True
         except UserNotParticipant:
-            info = await _get_chat_info(client, ch["id"])
-            if info:
-                title = ch["name"] or info["title"]
-                missing.append({"id": info["id"], "title": title, "url": info["url"]})
-            else:
-                # kanal ma'lumoti ham olinmadi — bot kanalga kira olmayapti
+            user_missing = True
+        except Exception as first_err:
+            # Peer cache warm-up: @username/ref orqali resolve, keyin retry
+            try:
+                await client.get_chat(probe)
+            except Exception as warm_err:
+                logger.warning(
+                    f"force_join: kanal aniqlanmadi ({cid}, probe={probe}): {warm_err}"
+                )
                 return "error", [], "bot_not_in_channel"
-        except (ChatAdminRequired, ChannelPrivate) as e:
-            logger.warning(f"force_join: kanal tekshirilmadi ({ch['id']}): {e}")
-            return "error", [], "bot_not_in_channel"
-        except Exception as e:
-            # PEER_ID_INVALID va shu kabi: bot kanalni tanimaydi = bot a'zo emas
-            logger.warning(f"force_join: tekshiruv xatosi ({ch['id']}): {e}")
-            return "error", [], "bot_not_in_channel"
+            try:
+                await client.get_chat_member(cid, user_id)
+                is_member = True
+            except UserNotParticipant:
+                user_missing = True
+            except Exception as retry_err:
+                logger.warning(
+                    f"force_join: retry xato ({cid}): {retry_err} | birinchi: {first_err}"
+                )
+                return "error", [], "bot_not_in_channel"
+
+        if is_member:
+            continue
+
+        # User a'zo emas — missing ro'yxatga qo'shamiz (maxsus nom ustuvor)
+        info = await _get_chat_info(client, probe)
+        if info:
+            title = ch["name"] or info["title"]
+            missing.append({"id": info["id"], "title": title, "url": info["url"]})
+        elif ref.startswith("@"):
+            missing.append({
+                "id": cid,
+                "title": ch["name"] or ref,
+                "url": f"https://t.me/{ref.lstrip('@')}",
+            })
+        else:
+            # kanal ma'lumoti olinmadi, lekin a'zolik holati aniq — baribir ko'rsatamiz
+            missing.append({"id": cid, "title": ch["name"] or cid, "url": ""})
     return "ok", missing, ""
 
 
@@ -436,7 +476,7 @@ async def handle_admin_add_channel_input(client: Client, message: Message):
         return
 
     # 2-bosqich: maxsus nom so'rash (userlarga shu nom ko'rinadi)
-    user_states[uid] = f"admin_fj_add_name|{chat.id}|{chat.title or target}"
+    user_states[uid] = f"admin_fj_add_name|{target}|{chat.id}|{chat.title or target}"
     await message.reply_text(
         f"✅ **Kanal topildi:** {chat.title or target}\n\n"
         "✏️ Endi kanal uchun **maxsus nom** yuboring — aynan shu nom "
@@ -455,9 +495,10 @@ async def handle_admin_add_name_input(client: Client, message: Message):
     if not isinstance(state, str) or not state.startswith("admin_fj_add_name|"):
         user_states.pop(uid, None)
         return
-    parts = state.split("|", 2)
-    channel_id = parts[1] if len(parts) > 1 else ""
-    channel_title = parts[2] if len(parts) > 2 else ""
+    parts = state.split("|", 3)
+    ref = parts[1] if len(parts) > 1 else ""          # asl input (@username/ID)
+    channel_id = parts[2] if len(parts) > 2 else ""
+    channel_title = parts[3] if len(parts) > 3 else ""
     user_states.pop(uid, None)
 
     if not channel_id:
@@ -498,7 +539,7 @@ async def handle_admin_add_name_input(client: Client, message: Message):
         )
         return
 
-    channels.append({"id": channel_id, "name": name})
+    channels.append({"id": channel_id, "name": name, "ref": ref})
     _chat_info_cache.pop(channel_id, None)
     if not await set_force_channels(channels):
         await message.reply_text(
