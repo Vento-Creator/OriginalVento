@@ -33,23 +33,43 @@ _admin_cb_filter = filters.create(_admin_cb_filter_fn)
 
 # ------------------------- Sozlamalar -------------------------
 
+# Tekshiruv amalga oshmaganida (bot kanalga kira olmasa) userlarga ko'rsatiladigan aloqa
+ADMIN_CONTACT = "@Nova_OS_Builder_Admin"
+
+
 async def is_force_join_enabled() -> bool:
     return (await get_bot_setting("force_join_enabled")) != "0"
 
 
 async def get_force_channels() -> list:
+    """[{'id': '-100...', 'name': 'Custom nom'|''}, ...]
+
+    Eski format (oddiy string ro'yxat) ham avtomatik normalize qilinadi.
+    name bo'sh bo'lsa — kanalning haqiqiy nomi ishlatiladi.
+    """
     raw = await get_bot_setting("force_channels")
     try:
         data = json.loads(raw) if raw else []
-        if isinstance(data, list):
-            return [str(c) for c in data if str(c).strip()]
-        return []
     except Exception:
         return []
+    if not isinstance(data, list):
+        return []
+    result = []
+    for c in data:
+        if isinstance(c, dict) and str(c.get("id", "")).strip():
+            result.append({"id": str(c["id"]), "name": str(c.get("name") or "").strip()})
+        elif str(c).strip():
+            result.append({"id": str(c), "name": ""})
+    return result
 
 
 async def set_force_channels(channels: list) -> bool:
-    return await set_bot_setting("force_channels", json.dumps([str(c) for c in channels]))
+    cleaned = [
+        {"id": str(c["id"]), "name": str(c.get("name") or "").strip()}
+        for c in channels
+        if str(c.get("id", "")).strip()
+    ]
+    return await set_bot_setting("force_channels", json.dumps(cleaned))
 
 
 # ------------------------- Kanal ma'lumotlari keshi -------------------------
@@ -86,26 +106,30 @@ async def _get_chat_info(client: Client, channel_id: str):
 # ------------------------- Tekshiruv -------------------------
 
 async def check_user_joined(client: Client, user_id: int):
-    """(True, []) — hammasiga a'zo; (False, missing) — a'zo bo'lmagan kanallar."""
+    """('ok', []) — hammasiga a'zo; ('join', missing) — a'zo bo'lish kerak;
+    ('error', []) — tekshiruv amalga oshmadi (bot kanalga kira olmaydi)."""
     channels = await get_force_channels()
     if not channels:
-        return True, []
+        return "ok", []
     missing = []
     for ch in channels:
         try:
-            await client.get_chat_member(ch, user_id)
+            await client.get_chat_member(ch["id"], user_id)
         except UserNotParticipant:
-            info = await _get_chat_info(client, ch)
+            info = await _get_chat_info(client, ch["id"])
             if info:
-                missing.append(info)
+                title = ch["name"] or info["title"]
+                missing.append({"id": info["id"], "title": title, "url": info["url"]})
+            else:
+                # kanal ma'lumoti ham olinmadi — bot kanalga kira olmayapti
+                return "error", []
         except (ChatAdminRequired, ChannelPrivate) as e:
-            # fail-open: bot kira olmaydigan kanal userlarni bloklamasin
-            logger.warning(f"force_join: kanal tekshirilmadi ({ch}): {e}")
-            continue
+            logger.warning(f"force_join: kanal tekshirilmadi ({ch['id']}): {e}")
+            return "error", []
         except Exception as e:
-            logger.warning(f"force_join: tekshiruv xatosi ({ch}): {e}")
-            continue
-    return (len(missing) == 0), missing
+            logger.warning(f"force_join: tekshiruv xatosi ({ch['id']}): {e}")
+            return "error", []
+    return "ok", missing
 
 
 def _build_screen(missing):
@@ -126,16 +150,24 @@ async def enforce_force_join(client: Client, message: Message) -> bool:
             return True
     except Exception:
         return True  # fail-open
-    ok, missing = await check_user_joined(client, message.from_user.id)
-    if ok:
+    status, missing = await check_user_joined(client, message.from_user.id)
+    if status == "ok":
         return True
-    text, buttons = _build_screen(missing)
+    if status == "error":
+        text = f"❌ **Xatolik!** Admin bilan bog'laning: {ADMIN_CONTACT}"
+        buttons = None
+        logger.warning("force_join: tekshiruv amalga oshmadi (bot kanalga kira olmaydi)")
+    else:
+        text, buttons = _build_screen(missing)
     try:
-        await message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(buttons),
-            disable_web_page_preview=True,
-        )
+        if buttons is None:
+            await message.reply_text(text)
+        else:
+            await message.reply_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(buttons),
+                disable_web_page_preview=True,
+            )
     except Exception as e:
         logger.warning(f"force_join: ekran yuborilmadi: {e}")
     return False
@@ -146,8 +178,15 @@ async def enforce_force_join(client: Client, message: Message) -> bool:
 @Client.on_callback_query(filters.regex("^fj_check$"))
 async def fj_check_callback(client: Client, cq):
     uid = cq.from_user.id
-    ok, missing = await check_user_joined(client, uid)
-    if ok:
+    status, missing = await check_user_joined(client, uid)
+    if status == "error":
+        try:
+            await cq.message.edit_text(f"❌ **Xatolik!** Admin bilan bog'laning: {ADMIN_CONTACT}")
+        except Exception:
+            pass
+        await cq.answer("❌ Tekshiruvda xatolik. Admin bilan bog'laning.", show_alert=True)
+        return
+    if status == "ok":
         try:
             await cq.message.edit_text("✅ **Rahmat!** Endi botdan to'liq foydalanishingiz mumkin.")
         except Exception:
@@ -188,6 +227,9 @@ async def admin_force_join_callback(client: Client, cq):
     if not await _admin_perm_check(cq):
         return
 
+    # Bekor qilingan qo'shish oqimlarini tozalash
+    user_states.pop(cq.from_user.id, None)
+
     enabled = await is_force_join_enabled()
     channels = await get_force_channels()
     status_label = "🟢 Yoqilgan" if enabled else "🔴 O'chirilgan"
@@ -199,9 +241,9 @@ async def admin_force_join_callback(client: Client, cq):
     ]
     if channels:
         for i, ch in enumerate(channels, 1):
-            info = await _get_chat_info(client, ch)
-            title = info["title"] if info else ch
-            lines.append(f"{i}. {title} (`{ch}`)")
+            info = await _get_chat_info(client, ch["id"])
+            title = ch["name"] or (info["title"] if info else ch["id"])
+            lines.append(f"{i}. {title} (`{ch['id']}`)")
         lines.append("")
     else:
         lines.append("📭 Hozircha kanal qo'shilmagan.\n")
@@ -218,8 +260,8 @@ async def admin_force_join_callback(client: Client, cq):
         [InlineKeyboardButton("➕ Kanal qo'shish", callback_data="admin_fj_add")],
     ]
     for i, ch in enumerate(channels):
-        info = await _get_chat_info(client, ch)
-        title = info["title"] if info else ch
+        info = await _get_chat_info(client, ch["id"])
+        title = ch["name"] or (info["title"] if info else ch["id"])
         buttons.append([InlineKeyboardButton(f"🗑 {title}", callback_data=f"admin_fj_del_{i}")])
     buttons.append([InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")])
 
@@ -350,7 +392,7 @@ async def handle_admin_add_channel_input(client: Client, message: Message):
         return
 
     channels = await get_force_channels()
-    if str(chat.id) in channels:
+    if any(c["id"] == str(chat.id) for c in channels):
         await message.reply_text(
             f"⚠️ **Bu kanal allaqachon qo'shilgan:** {chat.title or target}",
             reply_markup=InlineKeyboardMarkup([[
@@ -359,8 +401,71 @@ async def handle_admin_add_channel_input(client: Client, message: Message):
         )
         return
 
-    channels.append(str(chat.id))
-    _chat_info_cache.pop(str(chat.id), None)
+    # 2-bosqich: maxsus nom so'rash (userlarga shu nom ko'rinadi)
+    user_states[uid] = f"admin_fj_add_name|{chat.id}|{chat.title or target}"
+    await message.reply_text(
+        f"✅ **Kanal topildi:** {chat.title or target}\n\n"
+        "✏️ Endi kanal uchun **maxsus nom** yuboring — aynan shu nom "
+        "foydalanuvchilarga inline tugmada ko'rinadi.\n\n"
+        "Haqiqiy kanal nomini ishlatish uchun `skip` deb yozing.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("❌ Bekor qilish", callback_data="admin_force_join")
+        ]])
+    )
+
+
+async def handle_admin_add_name_input(client: Client, message: Message):
+    """Kanal qo'shishning 2-bosqichi: maxsus nomni qabul qilish."""
+    uid = message.from_user.id
+    state = user_states.get(uid)
+    if not isinstance(state, str) or not state.startswith("admin_fj_add_name|"):
+        user_states.pop(uid, None)
+        return
+    parts = state.split("|", 2)
+    channel_id = parts[1] if len(parts) > 1 else ""
+    channel_title = parts[2] if len(parts) > 2 else ""
+    user_states.pop(uid, None)
+
+    if not channel_id:
+        await message.reply_text(
+            "❌ Kanal ma'lumoti yo'qolgan. Qaytadan qo'shing.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Orqaga", callback_data="admin_force_join")
+            ]])
+        )
+        return
+
+    raw = (message.text or "").strip()
+
+    def _retry_prompt(text_hint):
+        user_states[uid] = state  # holatni saqlab qo'yamiz
+        return text_hint
+
+    if not raw:
+        await message.reply_text(_retry_prompt(
+            "❌ Nom bo'sh bo'lishi mumkin emas. Nom yuboring yoki `skip` yozing."
+        ))
+        return
+    if len(raw) > 64:
+        await message.reply_text(_retry_prompt(
+            "❌ Nom juda uzun (maks. 64 belgi). Qaytadan yuboring yoki `skip` yozing."
+        ))
+        return
+
+    name = "" if raw.lower() == "skip" else raw
+
+    channels = await get_force_channels()
+    if any(c["id"] == channel_id for c in channels):
+        await message.reply_text(
+            "⚠️ **Bu kanal allaqachon qo'shilgan.**",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Orqaga", callback_data="admin_force_join")
+            ]])
+        )
+        return
+
+    channels.append({"id": channel_id, "name": name})
+    _chat_info_cache.pop(channel_id, None)
     if not await set_force_channels(channels):
         await message.reply_text(
             "❌ Sozlama saqlashda xatolik.",
@@ -373,25 +478,26 @@ async def handle_admin_add_channel_input(client: Client, message: Message):
     # Bot kanalga a'zomi — bo'lmasa ogohlantirish
     warning = ""
     try:
-        await client.get_chat_member(chat.id, "me")
+        await client.get_chat_member(channel_id, "me")
     except (UserNotParticipant, ChatAdminRequired, ChannelPrivate):
         warning = (
             "\n⚠️ **Diqqat:** Bot hali kanal a'zosi (admini) emas — aks holda "
-            "tekshiruv ishlamaydi. Botni kanalga admin qilib qo'shing."
+            "tekshiruvda xatolik chiqadi. Botni kanalga admin qilib qo'shing."
         )
     except Exception:
         pass
 
     try:
         from database import log_admin_action
-        await log_admin_action(uid, "force_join_add_channel", None, str(chat.id))
+        await log_admin_action(uid, "force_join_add_channel", None, channel_id)
     except Exception:
         pass
 
+    display = name or channel_title
     await message.reply_text(
         f"✅ **Kanal qo'shildi!**\n\n"
-        f"📢 {chat.title or target}\n"
-        f"🆔 `{chat.id}`{warning}\n\n"
+        f"📢 Nom: {display}\n"
+        f"🆔 `{channel_id}`{warning}\n\n"
         f"Jami kanallar: {len(channels)} ta. Majburiy obunani yoqishni unutmang!",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("📢 Majburiy obuna sozlamalari", callback_data="admin_force_join")

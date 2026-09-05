@@ -1455,6 +1455,11 @@ async def admin_add_handler(client: Client, message: Message):
         )
         return
     
+    if isinstance(state, str) and state.startswith("admin_fj_add_name|"):
+        from plugins.force_join import handle_admin_add_name_input
+        await handle_admin_add_name_input(client, message)
+        return
+
     if state == "admin_fj_add_channel":
         user_states.pop(uid, None)
         from plugins.force_join import handle_admin_add_channel_input
