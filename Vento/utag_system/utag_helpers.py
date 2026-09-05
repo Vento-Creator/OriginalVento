@@ -13,12 +13,12 @@ from pyrogram.errors import FloodWait
 
 logger = logging.getLogger(__name__)
 
-UTAG_SPEED_MIN = 0.1
+UTAG_SPEED_MIN = 0.05
 UTAG_SPEED_MAX = 5.0
 UTAG_SPEED_DEFAULT = 0.8
 
 SPEED_WARNING = (
-    "⚠️ 0.1s-0.5s oralig'idagi yuqori tezlik akkauntingiz Telegram tomonidan "
+    "⚠️ 0.05s-0.5s oralig'idagi yuqori tezlik akkauntingiz Telegram tomonidan "
     "spam/flood limitiga tushish xavfini oshiradi. Barcha mas'uliyat foydalanuvchi zimmasida!"
 )
 
@@ -35,11 +35,14 @@ def get_utag_speed_seconds(settings: dict) -> float:
             val = float(legacy)
         else:
             val = LEGACY_SPEED_MAP.get(str(legacy), UTAG_SPEED_DEFAULT)
-    return max(UTAG_SPEED_MIN, min(UTAG_SPEED_MAX, round(val, 1)))
+    return max(UTAG_SPEED_MIN, min(UTAG_SPEED_MAX, round(val, 2)))
 
 
 def format_speed_label(seconds: float) -> str:
-    return f"⏱️ {seconds:.1f}s"
+    # 1 decimal for normal values (0.8 -> "0.8s"), 2 decimals only when needed (0.05 -> "0.05s")
+    if abs(seconds * 10 - round(seconds * 10)) < 1e-9:
+        return f"⏱️ {seconds:.1f}s"
+    return f"⏱️ {seconds:.2f}s"
 
 
 def is_high_speed_risk(seconds: float) -> bool:

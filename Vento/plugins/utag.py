@@ -1597,6 +1597,11 @@ async def utag_speed_callback(client: Client, cq: CallbackQuery):
         f"{SPEED_WARNING}",
         [
             [
+                InlineKeyboardButton("0.05s", callback_data="utag_set_speed_0.05"),
+                InlineKeyboardButton("0.1s", callback_data="utag_set_speed_0.1"),
+                InlineKeyboardButton("0.2s", callback_data="utag_set_speed_0.2"),
+            ],
+            [
                 InlineKeyboardButton("0.5s", callback_data="utag_set_speed_0.5"),
                 InlineKeyboardButton("0.8s ✓", callback_data="utag_set_speed_0.8"),
                 InlineKeyboardButton("1.5s", callback_data="utag_set_speed_1.5"),
@@ -1622,7 +1627,7 @@ async def utag_speed_custom_callback(client: Client, cq: CallbackQuery):
         cq,
         f"✏️ **Maxsus tezlik**\n\n"
         f"{UTAG_SPEED_MIN}s dan {UTAG_SPEED_MAX}s gacha raqam yuboring.\n"
-        f"Masalan: `0.8` yoki `2.5`\n\n"
+        f"Masalan: `0.05`, `0.1` yoki `0.8`\n\n"
         f"{SPEED_WARNING}",
         [[InlineKeyboardButton("❌ Bekor qilish", callback_data="utag_speed")]],
     )
@@ -1640,7 +1645,7 @@ async def utag_set_speed_callback(client: Client, cq: CallbackQuery):
         await cq.answer("Xatolik", show_alert=True)
         return
 
-    speed = max(UTAG_SPEED_MIN, min(UTAG_SPEED_MAX, round(speed, 1)))
+    speed = max(UTAG_SPEED_MIN, min(UTAG_SPEED_MAX, round(speed, 2)))
     if user_id not in user_settings:
         user_settings[user_id] = {}
     user_settings[user_id]["utag_speed_seconds"] = speed
@@ -3644,7 +3649,7 @@ async def handle_custom_utag_speed(client: Client, message: Message, user_id: in
     """Custom UTag tezligi qiymatini qabul qilish."""
     raw = message.text.strip().replace(",", ".")
     try:
-        speed = round(float(raw), 1)
+        speed = round(float(raw), 2)
     except ValueError:
         await message.reply_text(
             f"❌ Noto'g'ri format! {UTAG_SPEED_MIN}s — {UTAG_SPEED_MAX}s orasida raqam yuboring.",
