@@ -12,7 +12,7 @@ class UtagSettings:
     # Rate limiting
     max_parallel_utag: int = 5
     default_delay: float = 0.8
-    min_delay: float = 0.05
+    min_delay: float = 0.01
     max_delay: float = 5.0
     
     # Command settings

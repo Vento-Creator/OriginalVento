@@ -13,12 +13,12 @@ from pyrogram.errors import FloodWait
 
 logger = logging.getLogger(__name__)
 
-UTAG_SPEED_MIN = 0.05
+UTAG_SPEED_MIN = 0.01
 UTAG_SPEED_MAX = 5.0
 UTAG_SPEED_DEFAULT = 0.8
 
 SPEED_WARNING = (
-    "⚠️ 0.05s-0.5s oralig'idagi yuqori tezlik akkauntingiz Telegram tomonidan "
+    "⚠️ 0.01s-0.5s oralig'idagi yuqori tezlik akkauntingiz Telegram tomonidan "
     "spam/flood limitiga tushish xavfini oshiradi. Barcha mas'uliyat foydalanuvchi zimmasida!"
 )
 

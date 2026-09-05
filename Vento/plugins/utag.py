@@ -1597,16 +1597,17 @@ async def utag_speed_callback(client: Client, cq: CallbackQuery):
         f"{SPEED_WARNING}",
         [
             [
+                InlineKeyboardButton("0.01s", callback_data="utag_set_speed_0.01"),
                 InlineKeyboardButton("0.05s", callback_data="utag_set_speed_0.05"),
                 InlineKeyboardButton("0.1s", callback_data="utag_set_speed_0.1"),
-                InlineKeyboardButton("0.2s", callback_data="utag_set_speed_0.2"),
             ],
             [
+                InlineKeyboardButton("0.2s", callback_data="utag_set_speed_0.2"),
                 InlineKeyboardButton("0.5s", callback_data="utag_set_speed_0.5"),
                 InlineKeyboardButton("0.8s ✓", callback_data="utag_set_speed_0.8"),
-                InlineKeyboardButton("1.5s", callback_data="utag_set_speed_1.5"),
             ],
             [
+                InlineKeyboardButton("1.5s", callback_data="utag_set_speed_1.5"),
                 InlineKeyboardButton("3.0s", callback_data="utag_set_speed_3.0"),
                 InlineKeyboardButton("5.0s", callback_data="utag_set_speed_5.0"),
             ],
@@ -1627,7 +1628,7 @@ async def utag_speed_custom_callback(client: Client, cq: CallbackQuery):
         cq,
         f"✏️ **Maxsus tezlik**\n\n"
         f"{UTAG_SPEED_MIN}s dan {UTAG_SPEED_MAX}s gacha raqam yuboring.\n"
-        f"Masalan: `0.05`, `0.1` yoki `0.8`\n\n"
+        f"Masalan: `0.01`, `0.05` yoki `0.8`\n\n"
         f"{SPEED_WARNING}",
         [[InlineKeyboardButton("❌ Bekor qilish", callback_data="utag_speed")]],
     )
