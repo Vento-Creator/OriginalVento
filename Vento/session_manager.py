@@ -93,6 +93,7 @@ def get_accounts(user_id: int) -> list:
             "added": info.get("added"),
         })
     # Slot 0 metallamada bo'lmasa ham, session fayli mavjud bo'lsa qo'shamiz (legacy)
+    # Va shu session faylini metallamaga ham yozib qo'yamiz
     if "0" not in data.get("accounts", {}) and os.path.exists(_session_name(user_id, 0) + ".session"):
         accounts.append({
             "slot": 0,
@@ -101,6 +102,14 @@ def get_accounts(user_id: int) -> list:
             "first_name": None,
             "added": None,
         })
+        # Metallamaga ham yozib qo'yamiz
+        data.setdefault("accounts", {})["0"] = {
+            "name": "Akkount-1",
+            "tg_id": None,
+            "first_name": None,
+            "added": int(time.time()),
+        }
+        _save_accounts_data(user_id, data)
     accounts.sort(key=lambda a: a["slot"])
     return accounts
 
