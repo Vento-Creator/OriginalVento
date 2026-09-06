@@ -227,19 +227,22 @@ def move_session_to_final(user_id: int) -> bool:
     aks holda — user_{id}.session fayliga.
     """
     try:
-        slot = get_add_slot_target(user_id)  # session_manager.py da bor
+        import shutil
+        slot = get_add_slot_target(user_id)
         src = os.path.join(SESSIONS_DIR, "pending", f"user_{user_id}.session")
-        dst = _session_name(user_id, slot) + ".session" if slot else os.path.join(SESSIONS_DIR, f"user_{user_id}.session")
+        if slot:
+            dst = _session_name(user_id, slot) + ".session"
+        else:
+            dst = os.path.join(SESSIONS_DIR, f"user_{user_id}.session")
         if os.path.exists(src):
-            # final joydagi faylga aloqador lock yoki journal ham ko'chirilsin
-            import shutil
-            shutil.move(src, dst)
+            # os.replace — atomin, overwrite qiladi (cross-platform)
+            os.replace(src, dst)
             # journal/wal/shm ham ko'chirilsin (SQLite/WAL rejim uchun)
             for ext in ("-wal", "-shm", "-journal"):
                 s = src + ext
                 d = dst + ext
                 if os.path.exists(s):
-                    shutil.move(s, d)
+                    os.replace(s, d)
         return True
     except Exception as e:
         logger.warning(f"move_session_to_final: {e}")
