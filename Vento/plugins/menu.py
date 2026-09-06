@@ -1119,22 +1119,34 @@ async def acc_switch_callback(client: Client, cq: CallbackQuery):
     slot = int(cq.matches[0].group(1))
 
     from session_manager import set_active_slot, get_accounts, get_active_slot, close_user_client_slot
-    accounts = get_accounts(uid)
-    target = next((a for a in accounts if a["slot"] == slot), None)
-    if not target:
-        await cq.answer("❌ Akkount topilmadi.", show_alert=True)
-        return
+    import logging
+    logger = logging.getLogger(__name__)
 
-    old_slot = get_active_slot(uid)
-    if await set_active_slot(uid, slot):
-        # Avvalgi faol akkaunt clientini yopamiz — keyingi amallar yangi akkauntda
-        if old_slot != slot:
-            await close_user_client_slot(uid, old_slot)
-        await cq.answer(f"✅ {target['name']} ga o'tildi!", show_alert=True)
-        cq.data = "menu_account_back"
-        await menu_account_back_callback(client, cq)
-    else:
-        await cq.answer("❌ Almashtirishda xatolik.", show_alert=True)
+    try:
+        logger.info(f"acc_switch_callback: uid={uid}, slot={slot}")
+        accounts = get_accounts(uid)
+        logger.info(f"acc_switch_callback: accounts={accounts}")
+        target = next((a for a in accounts if a["slot"] == slot), None)
+        if not target:
+            logger.warning(f"acc_switch_callback: target not found for slot {slot}")
+            await cq.answer("❌ Akkount topilmadi.", show_alert=True)
+            return
+
+        old_slot = get_active_slot(uid)
+        logger.info(f"acc_switch_callback: old_slot={old_slot}, target_slot={slot}")
+        if await set_active_slot(uid, slot):
+            # Avvalgi faol akkaunt clientini yopamiz — keyingi amallar yangi akkauntda
+            if old_slot != slot:
+                await close_user_client_slot(uid, old_slot)
+            await cq.answer(f"✅ {target['name']} ga o'tildi!", show_alert=True)
+            cq.data = "menu_account_back"
+            await menu_account_back_callback(client, cq)
+        else:
+            logger.error(f"acc_switch_callback: set_active_slot returned False for slot {slot}")
+            await cq.answer("❌ Almashtirishda xatolik.", show_alert=True)
+    except Exception as e:
+        logger.error(f"acc_switch_callback error: {e}", exc_info=True)
+        await cq.answer(f"❌ Xatolik: {e}", show_alert=True)
 
 
 @Client.on_callback_query(filters.regex("^menu_account_back$"))
