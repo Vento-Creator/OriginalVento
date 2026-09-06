@@ -371,7 +371,7 @@ class LoginHandlers:
                     # Xatolik bo'lsa, kod yuborilmaydi, lekin account qo'shiladi
 
         register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=None)
-        await set_active_slot(user_id, slot)
+        set_active_slot(user_id, slot)
 
         logger.info(f"add_account: user {user_id} added slot {slot} (tg_id={tg_id}, first_name={first_name})")
 

@@ -1134,7 +1134,7 @@ async def acc_switch_callback(client: Client, cq: CallbackQuery):
 
         old_slot = get_active_slot(uid)
         logger.info(f"acc_switch_callback: old_slot={old_slot}, target_slot={slot}")
-        if await set_active_slot(uid, slot):
+        if set_active_slot(uid, slot):
             # Avvalgi faol akkaunt clientini yopamiz — keyingi amallar yangi akkauntda
             if old_slot != slot:
                 await close_user_client_slot(uid, old_slot)
