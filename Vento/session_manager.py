@@ -184,6 +184,10 @@ ACCOUNT_CONFIRM_TTL = 600  # 10 daqiqa (soniya)
 
 _pending_account_confirmations = {}  # user_id -> {"slot", "code", "tg_id", "first_name", "created"}
 
+# Multi-account: login jarayonida qaysi slot'ga yozish kerakligi.
+# {user_id: slot} — 0 = asosiy (default), 2/3 = qo'shimcha akkaunt.
+_add_slot_targets = {}
+
 
 def set_pending_confirmation(user_id: int, slot: int, code: str, tg_id=None, first_name=None):
     _pending_account_confirmations[user_id] = {
@@ -214,21 +218,28 @@ def get_slot_by_tg_id(user_id: int, tg_id: int):
     return None
 
 
+def set_add_slot(user_id: int, slot: int):
+    """Login jarayonini qo'shimcha akkaunt slot'iga yo'naltirish."""
+    _add_slot_targets[user_id] = int(slot)
+
+
 def get_add_slot_target(user_id: int) -> int:
     """Login jarayonida qo'shilayotgan slot-ni qaytaradi (0 = asosiy)."""
-    # _add_slot_targets lug'ati login_handlers.py da set_add_slot() bilan to'ldiriladi.
     return _add_slot_targets.get(user_id, 0)
 
 
-def move_session_to_final(user_id: int) -> bool:
+def clear_add_slot(user_id: int):
+    """Login jarayoni tugagach slot ma'lumotini tozalash."""
+    _add_slot_targets.pop(user_id, None)
+
+
+def move_session_to_final(user_id: int, slot: int = 0) -> bool:
     """Pending sessiyani (asosiy yoki slot) final joyiga ko'chiradi.
     
-    Multi-account paytida slot mavjud bo'lsa — user_{id}_acc_{slot}.session,
-    aks holda — user_{id}.session fayliga.
+    slot=0 → user_{id}.session (asosiy), slot>0 → user_{id}_acc_{slot}.session.
     """
     try:
         import shutil
-        slot = get_add_slot_target(user_id)
         src = os.path.join(SESSIONS_DIR, "pending", f"user_{user_id}.session")
         if slot:
             dst = _session_name(user_id, slot) + ".session"

@@ -821,7 +821,8 @@ class AuthManager:
             
                         # Move session to final directory (overwrites existing session if present)
             from session_manager import move_session_to_final as _move_session_to_final
-            if not _move_session_to_final(user_id):
+            _slot = self.session_manager.get_add_slot(user_id)
+            if not _move_session_to_final(user_id, _slot):
                 raise SessionError("Sessiya faylini ko'chirishda xatolik")
 
             # Persist which api_id/api_hash pair created this session so that
