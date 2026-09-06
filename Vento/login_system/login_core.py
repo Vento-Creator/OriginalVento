@@ -51,8 +51,21 @@ class SessionManager:
         # session can later be loaded with the SAME api_id pair that created
         # it (Telegram rejects initConnection with a mismatched api_id).
         self._api_map_path = os.path.join(sessions_dir, "session_api_map.json")
+        # Multi-account: login jarayonida qaysi slot'ga yozish kerakligi.
+        # {user_id: slot} — 0 = asosiy (default), 2/3 = qo'shimcha akkaunt.
+        self._add_slot_targets: dict = {}
         os.makedirs(self.pending_dir, exist_ok=True)
         os.makedirs(self.sessions_dir, exist_ok=True)
+
+    def set_add_slot(self, user_id: int, slot: int):
+        """Login jarayonini qo'shimcha akkaunt slot'iga yo'naltirish."""
+        self._add_slot_targets[user_id] = int(slot)
+
+    def get_add_slot(self, user_id: int) -> int:
+        return self._add_slot_targets.get(user_id, 0)
+
+    def clear_add_slot(self, user_id: int):
+        self._add_slot_targets.pop(user_id, None)
 
     def record_session_api(self, user_id: int, api_id: int, api_hash: str):
         """Persist which api_id/api_hash pair created this user's session."""
@@ -78,7 +91,10 @@ class SessionManager:
         return os.path.join(self.pending_dir, f"user_{user_id}")
     
     def get_final_session_path(self, user_id: int) -> str:
-        """Get final session file path"""
+        """Get final session file path (multi-account: slot-aware)"""
+        slot = self._add_slot_targets.get(user_id, 0)
+        if slot:
+            return os.path.join(self.sessions_dir, f"user_{user_id}_acc_{int(slot)}")
         return os.path.join(self.sessions_dir, f"user_{user_id}")
     
     def cleanup_pending(self, user_id: int):
@@ -847,7 +863,10 @@ class AuthManager:
                     "first_name": None
                 }
                 
-                await LoginDatabaseAdapter.save_user_session(user_id, phone or "", session_data)
+                # Multi-account: qo'shimcha akkaunt loginida asosiy user
+                # ma'lumotlarini (users jadvali) BOSMAYMIZ — bu boshqa TG akkaunt.
+                if not self.session_manager.get_add_slot(user_id):
+                    await LoginDatabaseAdapter.save_user_session(user_id, phone or "", session_data)
                 await log_system_event("login_system", user_id, "login_complete", f"Phone: {phone}")
                 
             except Exception as db_error:

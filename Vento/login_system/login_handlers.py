@@ -248,6 +248,18 @@ class LoginHandlers:
         from database_adapter import LoginDatabaseAdapter
         
         logger.info(f"User {user_id} logged in successfully, processing database updates.")
+
+        # ------------------------------------------------------------------
+        # MULTI-ACCOUNT: bu login "➕ Akkount qo'shish" oqimi bo'lsa —
+        # admin approval/subscription oqimini TO'LIQ bypass qilamiz.
+        # User allaqachon known+approved (faqat yangi TG akkaunt qo'shmoqda).
+        # ------------------------------------------------------------------
+        add_slot = self.login_service.session_manager.get_add_slot(user_id)
+        if add_slot:
+            self.login_service.session_manager.clear_add_slot(user_id)
+            await self._finalize_add_account(client, message, user_id, add_slot, msg)
+            return
+
         # Register user in database (known_users table only - does NOT activate)
         await register_known_user(user_id, message.from_user.username, message.from_user.first_name)
         
@@ -285,6 +297,43 @@ class LoginHandlers:
             
             # Notify admin
             await self._notify_admin(client, message.from_user)
+    
+    async def _finalize_add_account(self, client: Client, message: Message, user_id: int, slot: int, msg):
+        """Qo'shimcha akkaunt logini muvaffaqiyatli — ro'yxatga olib faol qilish."""
+        from session_manager import register_account, set_active_slot, get_accounts
+        import session_manager as sm
+
+        # Yangi TG akkaunt ma'lumotlari
+        tg_id = None
+        first_name = None
+        try:
+            me = await client.get_me()
+            if me:
+                tg_id = me.id
+                first_name = me.first_name
+        except Exception as e:
+            logger.warning(f"add_account: get_me failed: {e}")
+
+        # Default nom: haqiqiy first_name (foydalanuvchi keyin o'zgartirishi mumkin)
+        existing = get_accounts(user_id)
+        display = first_name or f"Akkount-{slot}"
+        register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=display)
+        await set_active_slot(user_id, slot)
+
+        logger.info(f"add_account: user {user_id} added slot {slot} (tg_id={tg_id}, name={display})")
+
+        names = [a["name"] for a in get_accounts(user_id)]
+        await msg.edit_text(
+            f"✅ **Akkount ulandi!**\n\n"
+            f"📱 Yangi akkaunt: {display}\n"
+            f"🟢 Faol akkaunt endi: **{display}**\n\n"
+            f"👥 Akkauntlar: {', '.join(names)}\n\n"
+            f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin.",
+        )
+
+        from plugins.menu import get_main_keyboard
+        kb_reply = await get_main_keyboard(user_id)
+        await message.reply_text("🏠 **Bosh menyu**", reply_markup=kb_reply)
     
     async def _notify_admin(self, client: Client, user):
         """Notify admin about new user"""

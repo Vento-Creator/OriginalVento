@@ -18,7 +18,12 @@ def _is_admin(uid: int) -> bool:
     return is_admin(uid)
 
 def _has_session(uid: int) -> bool:
-    return os.path.exists(os.path.join(SESSIONS_DIR, f"user_{uid}.session"))
+    """Multi-account: har qanday slotda session fayl bo'lsa True."""
+    try:
+        from session_manager import has_active_sessions
+        return has_active_sessions(uid)
+    except Exception:
+        return os.path.exists(os.path.join(SESSIONS_DIR, f"user_{uid}.session"))
 
 async def _has_access(uid: int) -> bool:
     if _is_admin(uid):
@@ -436,6 +441,28 @@ async def menu_button_handler(client: Client, message: Message):
                      "waiting_contact_subject", "waiting_contact_message"]:
             raise ContinuePropagation
         
+        # Multi-account: akkount nomini o'zgartirish inputi
+        if isinstance(state, str) and state.startswith("acc_rename_inp|"):
+            try:
+                slot = int(state.split("|", 1)[1])
+            except (ValueError, IndexError):
+                user_states.pop(uid, None)
+                raise ContinuePropagation
+            user_states.pop(uid, None)
+            name = (message.text or "").strip()
+            from session_manager import update_account_name
+            if not name:
+                await message.reply_text("❌ Nom bo'sh bo'lishi mumkin emas. Qaytadan urinib ko'ring.")
+                return
+            if len(name) > 32:
+                await message.reply_text("❌ Nom juda uzun (maks. 32 belgi). Qaytadan yuboring.")
+                return
+            if update_account_name(uid, slot, name):
+                await message.reply_text(f"✅ Akkount nomi o'zgartirildi: **{name}**\n\n(bu nom faqat bot ichida ko'rinadi, real Telegram ismi o'zgarmaydi)")
+            else:
+                await message.reply_text("❌ Akkount topilmadi.")
+            return
+        
         sess = _has_session(uid)
         acc  = await _has_access(uid)
         adm  = _is_admin(uid)
@@ -463,15 +490,30 @@ async def menu_button_handler(client: Client, message: Message):
             if not sess:
                 await message.reply_text("Avval akkauntingizni ulang.")
                 return
-            await message.reply_text(
-                "👤 **Akkaunt sozlamalari**",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📱 Mini App-ni ochish", web_app=WebAppInfo(url=MINI_APP_URL))],
-                    [InlineKeyboardButton("⚙️ Action Sozlamalari", callback_data="action_status_menu_account")],
-                    [InlineKeyboardButton("🚪 Akkauntni uzish (Logout)", callback_data="logout")],
-                    [InlineKeyboardButton("🔙 Bosh menyu", callback_data="menu_main")],
-                ])
+            from session_manager import get_accounts, get_active_slot, MAX_SESSIONS_PER_USER
+            accounts = get_accounts(uid)
+            active_slot = get_active_slot(uid)
+            active_name = next((a["name"] for a in accounts if a["slot"] == active_slot),
+                               accounts[0]["name"] if accounts else "Akkount-1")
+
+            text = (
+                "👤 **Akkaunt sozlamalari**\n\n"
+                f"🟢 Faol akkaunt: **{active_name}**\n"
+                f"👥 Ulangan akkauntlar: **{len(accounts)}/{MAX_SESSIONS_PER_USER}**"
             )
+            buttons = [
+                [InlineKeyboardButton("📱 Mini App-ni ochish", web_app=WebAppInfo(url=MINI_APP_URL))],
+                [InlineKeyboardButton("⚙️ Action Sozlamalari", callback_data="action_status_menu_account")],
+            ]
+            if len(accounts) < MAX_SESSIONS_PER_USER:
+                buttons.append([InlineKeyboardButton("➕ Akkount qo'shish", callback_data="acc_add")])
+            if len(accounts) >= 2:
+                buttons.append([InlineKeyboardButton("👥 Akkauntni almashtirish", callback_data="acc_list")])
+                buttons.append([InlineKeyboardButton("✏️ Akkount nomlash", callback_data="acc_rename")])
+                buttons.append([InlineKeyboardButton("🗑 Akkount o'chirish", callback_data="acc_remove")])
+            buttons.append([InlineKeyboardButton("🚪 Akkauntni uzish (Logout)", callback_data="logout")])
+            buttons.append([InlineKeyboardButton("🔙 Bosh menyu", callback_data="menu_main")])
+            await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
             return
 
         if txt in {"🔍 Scraper", "🗂 Bazalar", "📨 Mass DM", "🏷 Utag"}:
@@ -857,3 +899,270 @@ async def group_start_handler(client: Client, message: Message):
         )
         
     await message.reply_text(text, reply_markup=keyboard)
+
+
+# ---------------------------------------------------------------------------
+# Multi-account: akkaunt qo'shish / almashtirish / nomlash / o'chirish
+# ---------------------------------------------------------------------------
+
+def _next_free_slot(uid: int):
+    """Bo'sh slot'ni topadi (2, 3, ...). None = hammasi band."""
+    from session_manager import get_accounts, MAX_SESSIONS_PER_USER
+    taken = {a["slot"] for a in get_accounts(uid)}
+    for s in range(2, MAX_SESSIONS_PER_USER + 1):
+        if s not in taken:
+            return s
+    return None
+
+
+@Client.on_callback_query(filters.regex("^acc_add$"))
+async def acc_add_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    if not await _has_access(uid):
+        await cq.answer("⛔️ Obuna/tasdiq kerak.", show_alert=True)
+        return
+
+    from session_manager import get_accounts, MAX_SESSIONS_PER_USER
+    accounts = get_accounts(uid)
+    if len(accounts) >= MAX_SESSIONS_PER_USER:
+        await cq.answer(f"❌ Maksimal {MAX_SESSIONS_PER_USER} ta akkaunt ulash mumkin!", show_alert=True)
+        return
+    if not _has_session(uid):
+        await cq.answer("❌ Avval asosiy akkauntni ulang (📱 Akkaunt ulash).", show_alert=True)
+        return
+
+    slot = _next_free_slot(uid)
+    if slot is None:
+        await cq.answer("❌ Barcha slotlar band!", show_alert=True)
+        return
+
+    # Login jarayonini shu slot'ga yo'naltirish
+    login_service.session_manager.set_add_slot(uid, slot)
+    user_states[uid] = "waiting_for_phone"
+    login_data[uid] = {"add_slot": slot}
+
+    await cq.message.edit_text(
+        f"➕ **Akkount-{slot} qo'shish**\n\n"
+        "📱 Yangi akkauntning **telefon raqamini** xalqaro formatda yuboring:\n"
+        "`+998901234567`\n\n"
+        "⚠️ Kod shu yangi akkauntga keladi (Telegram ilovasi yoki SMS).",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("❌ Bekor qilish", callback_data="acc_cancel_add")
+        ]])
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^acc_cancel_add$"))
+async def acc_cancel_add_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    login_service.session_manager.clear_add_slot(uid)
+    user_states.pop(uid, None)
+    login_data.pop(uid, None)
+    await cq.message.edit_text("❌ Akkount qo'shish bekor qilindi.")
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^acc_list$"))
+async def acc_list_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    from session_manager import get_accounts, get_active_slot
+    accounts = get_accounts(uid)
+    active_slot = get_active_slot(uid)
+
+    lines = [
+        "👥 **Akkauntni almashtirish**\n",
+        f"🟢 Faol: **{next((a['name'] for a in accounts if a['slot'] == active_slot), '?')}**\n",
+    ]
+    buttons = []
+    for a in accounts:
+        mark = "🟢" if a["slot"] == active_slot else "⚪️"
+        lines.append(f"{mark} {a['name']}")
+        if a["slot"] != active_slot:
+            buttons.append([InlineKeyboardButton(
+                f"🔄 {a['name']} ga o'tish",
+                callback_data=f"acc_switch_{a['slot']}",
+            )])
+    buttons.append([InlineKeyboardButton("🔙 Orqaga", callback_data="menu_account_back")])
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^acc_rename$"))
+async def acc_rename_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    from session_manager import get_accounts, get_active_slot
+    accounts = get_accounts(uid)
+    active_slot = get_active_slot(uid)
+
+    lines = ["✏️ **Akkount nomlash**\n\nQaysi akkauntni nomlaysiz?\n(bu nom faqat bot ichida ko'rinadi)\n"]
+    buttons = []
+    for a in accounts:
+        mark = "🟢" if a["slot"] == active_slot else "⚪️"
+        lines.append(f"{mark} {a['name']}")
+        buttons.append([InlineKeyboardButton(f"✏️ {a['name']}", callback_data=f"acc_rename_pick_{a['slot']}")])
+    buttons.append([InlineKeyboardButton("🔙 Orqaga", callback_data="menu_account_back")])
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^acc_rename_pick_(\d+)$"))
+async def acc_rename_pick_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    slot = int(cq.matches[0].group(1))
+    user_states[uid] = f"acc_rename_inp|{slot}"
+    await cq.message.edit_text(
+        f"✏️ **Akkount-{slot} uchun yangi nom yuboring:**\n\n"
+        "Masalan: `Akkount-2`, `Ish akkaunti`, `DimaPlay_Uz.exe`\n\n"
+        "💡 Bu nom faqat bot ichida ko'rinadi — real Telegram ismi o'zgarmaydi.\n"
+        "❌ Bekor qilish uchun /start bosing.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔙 Orqaga", callback_data="acc_rename")
+        ]])
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^acc_remove$"))
+async def acc_remove_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    from session_manager import get_accounts, get_active_slot
+    accounts = get_accounts(uid)
+    if len(accounts) < 2:
+        await cq.answer("❌ O'chirish uchun kamida 2 ta akkaunt kerak.", show_alert=True)
+        return
+    active_slot = get_active_slot(uid)
+
+    lines = ["🗑 **Akkount o'chirish**\n\nQaysi akkauntni o'chiramiz?\n\n⚠️ O'chirilgan akkaunt sessiyasi butunlay o'chadi!\n"]
+    buttons = []
+    for a in accounts:
+        mark = "🟢" if a["slot"] == active_slot else "⚪️"
+        lines.append(f"{mark} {a['name']}")
+        buttons.append([InlineKeyboardButton(f"🗑 {a['name']}", callback_data=f"acc_remove_pick_{a['slot']}")])
+    buttons.append([InlineKeyboardButton("🔙 Orqaga", callback_data="menu_account_back")])
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^acc_remove_pick_(\d+)$"))
+async def acc_remove_pick_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    slot = int(cq.matches[0].group(1))
+    from session_manager import get_accounts, get_active_slot
+    accounts = get_accounts(uid)
+    active_slot = get_active_slot(uid)
+    acc = next((a for a in accounts if a["slot"] == slot), None)
+    if not acc:
+        await cq.answer("❌ Akkount topilmadi.", show_alert=True)
+        return
+
+    confirm_text = (
+        "⚠️ **Tasdiqlash**\n\n"
+        "Akkauntni o'chirishni tasdiqlaysizmi?\n\n"
+        f"📱 {acc['name']}\n"
+        f"🆔 Slot: {slot}\n\n"
+    )
+    if slot == active_slot:
+        confirm_text += "ℹ️ Bu FAOL akkaunt — o'chirilsa, boshqa akkauntga avtomatik o'tiladi.\n\n"
+    confirm_text += "O'chirilgach sessiya qayta tiklanmaydi!"
+
+    await cq.message.edit_text(
+        confirm_text,
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🗑 Ha, o'chirish", callback_data=f"acc_remove_do_{slot}"),
+                InlineKeyboardButton("❌ Bekor qilish", callback_data="acc_remove"),
+            ]
+        ])
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^acc_remove_do_(\d+)$"))
+async def acc_remove_do_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    slot = int(cq.matches[0].group(1))
+    from session_manager import remove_account_slot, get_accounts, get_active_slot
+
+    ok = await remove_account_slot(uid, slot)
+    if not ok:
+        await cq.answer("❌ O'chirishda xatolik (kamida 1 ta akkaunt qolishi shart).", show_alert=True)
+        return
+
+    try:
+        from database import log_admin_action
+        await log_admin_action(uid, "account_remove_slot", None, str(slot))
+    except Exception:
+        pass
+
+    remaining = [a["name"] for a in get_accounts(uid)]
+    new_active = get_active_slot(uid)
+    new_name = next((a["name"] for a in get_accounts(uid) if a["slot"] == new_active), "Akkount-1")
+
+    await cq.answer("🗑 Akkount o'chirildi!", show_alert=True)
+    await cq.message.edit_text(
+        f"🗑 **Akkount o'chirildi!**\n\n"
+        f"🟢 Faol akkaunt endi: **{new_name}**\n"
+        f"👥 Qoldi: {len(remaining)} ta ({', '.join(remaining)})",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔙 Akkaunt sozlamalari", callback_data="menu_account_back")
+        ]])
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^acc_switch_(\d+)$"))
+async def acc_switch_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    slot = int(cq.matches[0].group(1))
+
+    from session_manager import set_active_slot, get_accounts, get_active_slot, close_user_client_slot
+    accounts = get_accounts(uid)
+    target = next((a for a in accounts if a["slot"] == slot), None)
+    if not target:
+        await cq.answer("❌ Akkount topilmadi.", show_alert=True)
+        return
+
+    old_slot = get_active_slot(uid)
+    if await set_active_slot(uid, slot):
+        # Avvalgi faol akkaunt clientini yopamiz — keyingi amallar yangi akkauntda
+        if old_slot != slot:
+            await close_user_client_slot(uid, old_slot)
+        await cq.answer(f"✅ {target['name']} ga o'tildi!", show_alert=True)
+        cq.data = "menu_account_back"
+        await menu_account_back_callback(client, cq)
+    else:
+        await cq.answer("❌ Almashtirishda xatolik.", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex("^menu_account_back$"))
+async def menu_account_back_callback(client: Client, cq: CallbackQuery):
+    """👤 Akkaunt sozlamalari ekrani (inline)."""
+    uid = cq.from_user.id
+    from session_manager import get_accounts, get_active_slot, MAX_SESSIONS_PER_USER
+    accounts = get_accounts(uid)
+    active_slot = get_active_slot(uid)
+    active_name = next((a["name"] for a in accounts if a["slot"] == active_slot), "Akkount-1")
+
+    lines = [
+        "👤 **Akkaunt sozlamalari**\n",
+        f"🟢 Faol akkaunt: **{active_name}**",
+        f"👥 Ulangan akkauntlar: **{len(accounts)}/{MAX_SESSIONS_PER_USER}**",
+    ]
+    buttons = [
+        [InlineKeyboardButton("📱 Mini App-ni ochish", web_app=WebAppInfo(url=MINI_APP_URL))],
+        [InlineKeyboardButton("⚙️ Action Sozlamalari", callback_data="action_status_menu_account")],
+    ]
+    if len(accounts) < MAX_SESSIONS_PER_USER:
+        buttons.append([InlineKeyboardButton("➕ Akkount qo'shish", callback_data="acc_add")])
+    if len(accounts) >= 2:
+        buttons.append([InlineKeyboardButton("👥 Akkauntni almashtirish", callback_data="acc_list")])
+        buttons.append([InlineKeyboardButton("✏️ Akkount nomlash", callback_data="acc_rename")])
+        buttons.append([InlineKeyboardButton("🗑 Akkount o'chirish", callback_data="acc_remove")])
+    buttons.append([InlineKeyboardButton("🚪 Akkauntni uzish (Logout)", callback_data="logout")])
+    buttons.append([InlineKeyboardButton("🔙 Bosh menyu", callback_data="menu_main")])
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await cq.answer()

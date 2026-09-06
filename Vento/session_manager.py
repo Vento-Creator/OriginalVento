@@ -7,6 +7,10 @@ from pyrogram.errors import AuthKeyUnregistered, AuthKeyDuplicated, SessionExpir
 from config import API_ID, API_HASH, SESSIONS_DIR, BASE_DIR
 from task_supervisor import schedule_guarded
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Maps user_id -> {"api_id": ..., "api_hash": ...} for sessions created via the
 # login system with a rotated api pair. Sessions without an entry were created
 # with the primary API_ID/API_HASH, which is used as fallback.
@@ -32,11 +36,148 @@ _user_locks = {}
 MAX_CONCURRENT_SESSIONS = 50  # Butun bot uchun maksimal parallel session
 MAX_SESSIONS_PER_USER = 3  # Har bir user uchun maksimal parallel session
 
-def get_user_lock(user_id: int) -> asyncio.Lock:
-    """Returns a unique lock for the given user_id."""
-    if user_id not in _user_locks:
-        _user_locks[user_id] = asyncio.Lock()
-    return _user_locks[user_id]
+# ---------------------------------------------------------------------------
+# Ko'p akkaunt (multi-account) tizimi
+#
+# Slot 0  -> user_{uid}.session        (asosiy/1-akkount, eski konvensiya)
+# Slot N  -> user_{uid}_acc_{N}.session (qo'shimcha akkauntlar)
+# Metallama -> user_{uid}_accounts.json
+# ---------------------------------------------------------------------------
+
+def _accounts_path(user_id: int) -> str:
+    return os.path.join(SESSIONS_DIR, f"user_{user_id}_accounts.json")
+
+
+def _load_accounts_data(user_id: int) -> dict:
+    try:
+        with open(_accounts_path(user_id), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"active_slot": 0, "accounts": {}}
+
+
+def _save_accounts_data(user_id: int, data: dict) -> None:
+    try:
+        tmp = _accounts_path(user_id) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _accounts_path(user_id))
+    except Exception as e:
+        logger.warning(f"multi-account: metallama saqlanmadi ({user_id}): {e}")
+
+
+def _session_name(user_id: int, slot: int = 0) -> str:
+    """Slot bo'yicha session fayl nomi (path, .session siz)."""
+    if slot in (0, None):
+        return os.path.join(SESSIONS_DIR, f"user_{user_id}")
+    return os.path.join(SESSIONS_DIR, f"user_{user_id}_acc_{int(slot)}")
+
+
+def get_accounts(user_id: int) -> list:
+    """Ulangan akkauntlar ro'yxati (slot bo'yicha tartiblangan).
+
+    Har bir yozuv: {slot, name, tg_id, first_name, added}
+    """
+    data = _load_accounts_data(user_id)
+    accounts = []
+    for slot_str, info in data.get("accounts", {}).items():
+        try:
+            slot = int(slot_str)
+        except (TypeError, ValueError):
+            continue
+        accounts.append({
+            "slot": slot,
+            "name": info.get("name") or info.get("first_name") or f"Akkount-{slot}",
+            "tg_id": info.get("tg_id"),
+            "first_name": info.get("first_name"),
+            "added": info.get("added"),
+        })
+    # Slot 0 metallamada bo'lmasa ham, session fayli mavjud bo'lsa qo'shamiz (legacy)
+    if "0" not in data.get("accounts", {}) and os.path.exists(_session_name(user_id, 0) + ".session"):
+        accounts.append({
+            "slot": 0,
+            "name": "Akkount-1",
+            "tg_id": None,
+            "first_name": None,
+            "added": None,
+        })
+    accounts.sort(key=lambda a: a["slot"])
+    return accounts
+
+
+def count_accounts(user_id: int) -> int:
+    return len(get_accounts(user_id))
+
+
+def get_active_slot(user_id: int) -> int:
+    data = _load_accounts_data(user_id)
+    try:
+        return int(data.get("active_slot", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_active_slot(user_id: int, slot: int) -> bool:
+    """Joriy (faol) akkauntni almashtirish."""
+    data = _load_accounts_data(user_id)
+    if str(slot) not in data.get("accounts", {}):
+        # Legacy slot 0: session fayli mavjud bo'lsa — avtomatik ro'yxatga olib ruxsat beramiz
+        if slot in (0, None) and os.path.exists(_session_name(user_id, 0) + ".session"):
+            data.setdefault("accounts", {})["0"] = {
+                "name": "Akkount-1",
+                "tg_id": None,
+                "first_name": None,
+                "added": int(time.time()),
+            }
+        else:
+            return False
+    data["active_slot"] = int(slot)
+    _save_accounts_data(user_id, data)
+    return True
+
+
+def register_account(user_id: int, slot: int, tg_id=None, first_name=None, name=None) -> bool:
+    """Yangi ulangan akkauntni metallamaga yozadi va uni faol qiladi."""
+    data = _load_accounts_data(user_id)
+    data.setdefault("accounts", {})
+    data["accounts"][str(slot)] = {
+        "name": name or first_name or f"Akkount-{slot}",
+        "tg_id": tg_id,
+        "first_name": first_name,
+        "added": int(time.time()),
+    }
+    data["active_slot"] = int(slot)
+    _save_accounts_data(user_id, data)
+    return True
+
+
+def update_account_name(user_id: int, slot: int, name: str) -> bool:
+    """Faqat bot ichida ko'rinadigan nom (real Telegram ismi o'zgarmaydi)."""
+    name = (name or "").strip()
+    if not name:
+        return False
+    data = _load_accounts_data(user_id)
+    acc = data.get("accounts", {}).get(str(slot))
+    if not acc:
+        return False
+    acc["name"] = name
+    _save_accounts_data(user_id, data)
+    return True
+
+
+def has_active_sessions(user_id: int) -> bool:
+    """Har qanday slotda session fayl bor-yo'qligi (asosiy menyu tekshiruvi)."""
+    for acc in get_accounts(user_id):
+        if os.path.exists(_session_name(user_id, acc["slot"]) + ".session"):
+            return True
+    return os.path.exists(os.path.join(SESSIONS_DIR, f"user_{user_id}.session"))
+
+def get_user_lock(user_id: int, slot: int = 0) -> asyncio.Lock:
+    """Returns a unique lock for the given user_id+slot."""
+    key = (user_id, slot)
+    if key not in _user_locks:
+        _user_locks[key] = asyncio.Lock()
+    return _user_locks[key]
 
 async def cleanup_idle_clients():
     """Fon rejimida ishlatilmayotgan sessiyalarni yopadi va xotiradan tozalaydi."""
@@ -44,15 +185,15 @@ async def cleanup_idle_clients():
         await asyncio.sleep(600)  # Har 10 daqiqada tekshiradi
         now = time.time()
         to_remove = []
-        for uid, last_used in list(_client_last_used.items()):
+        for key, last_used in list(_client_last_used.items()):
             if now - last_used > 1800:  # 30 daqiqa (1800 soniya) idle
-                to_remove.append(uid)
+                to_remove.append(key)
                     
-        for uid in to_remove:
-            user_lock = get_user_lock(uid)
+        for key in to_remove:
+            user_lock = get_user_lock(*key)
             async with user_lock:
-                client = _user_clients.pop(uid, None)
-                _client_last_used.pop(uid, None)
+                client = _user_clients.pop(key, None)
+                _client_last_used.pop(key, None)
                 if client and client.is_connected:
                     try:
                         await client.disconnect()
@@ -77,9 +218,9 @@ def _client_fingerprint() -> dict:
     return {"device_model": "Samsung SM-A136B", "app_version": "11.8.4", "system_version": "Android 14"}
 
 
-def _build_user_client(user_id: int) -> Client:
-    """Create a fresh userbot Client object for the given user."""
-    session_name = os.path.join(SESSIONS_DIR, f"user_{user_id}")
+def _build_user_client(user_id: int, slot: int = 0) -> Client:
+    """Create a fresh userbot Client object for the given user+slot."""
+    session_name = _session_name(user_id, slot)
     api_id, api_hash = _get_session_api_pair(user_id)
     fp = _client_fingerprint()
     return Client(
@@ -94,22 +235,23 @@ def _build_user_client(user_id: int) -> Client:
     )
 
 
-async def get_user_client(user_id: int) -> Client:
-    """Foydalanuvchi sessiyasini xotirada saqlaydi va ulanishni ochiq qoldiradi."""
+async def get_user_client_slot(user_id: int, slot: int = 0) -> Client:
+    """Muayyan slot'dagi sessiyani xotirada saqlaydi va ulanishni ochiq qoldiradi."""
     global _cleanup_task
     if _cleanup_task is None:
         _cleanup_task = schedule_guarded("SessionCleanup", cleanup_idle_clients())
 
     # Sessiya fayli mavjudligini tekshirish
-    session_file = os.path.join(SESSIONS_DIR, f"user_{user_id}.session")
+    session_file = _session_name(user_id, slot) + ".session"
     if not os.path.exists(session_file):
         raise Exception("sessiya tugagan")
 
-    user_lock = get_user_lock(user_id)
+    key = (user_id, slot)
+    user_lock = get_user_lock(user_id, slot)
     async with user_lock:
-        _client_last_used[user_id] = time.time()
+        _client_last_used[key] = time.time()
 
-        client = _user_clients.get(user_id)
+        client = _user_clients.get(key)
         # Only a client that is ALREADY connected has an open session + storage that can be
         # safely reused. In this Pyrogram fork, Client.disconnect() CLOSES the client's session
         # storage database and nulls client.session, so calling connect() again on a disconnected
@@ -123,46 +265,92 @@ async def get_user_client(user_id: int) -> Client:
         if client is None and len(_user_clients) >= MAX_CONCURRENT_SESSIONS:
             raise Exception(f"⚠️ Serverda hozircha ko'p sessiya ochiq! Iltimos, keyinroq urinib ko'ring.")
 
-        client = _build_user_client(user_id)
-        _user_clients[user_id] = client
+        client = _build_user_client(user_id, slot)
+        _user_clients[key] = client
 
         try:
             await asyncio.wait_for(client.connect(), timeout=10.0)
         except (AuthKeyUnregistered, AuthKeyDuplicated, SessionExpired, SessionRevoked):
-            _user_clients.pop(user_id, None)
-            _client_last_used.pop(user_id, None)
+            _user_clients.pop(key, None)
+            _client_last_used.pop(key, None)
             # Sessiya faylini o'chirmaymiz - Owner panelida akkaunt qaytarish uchun kerak
             raise Exception("sessiya tugagan")
         except Exception as e:
-            _user_clients.pop(user_id, None)
-            _client_last_used.pop(user_id, None)
+            _user_clients.pop(key, None)
+            _client_last_used.pop(key, None)
             if "sessiya" in str(e).lower() or "session" in str(e).lower():
                 raise Exception("sessiya tugagan")
             raise e
 
         return client
 
+async def get_user_client(user_id: int) -> Client:
+    """FAOL akkaunt sessiyasini qaytaradi (multi-account: active slot)."""
+    slot = get_active_slot(user_id)
+    return await get_user_client_slot(user_id, slot)
+
 async def close_user_client(user_id: int):
-    """Force clear user client from memory cache - CRITICAL for logout security"""
-    user_lock = get_user_lock(user_id)
+    """Barcha slotlardagi clientlarni xotiradan yopadi/olib tashlaydi.
+
+    CRITICAL for logout security — logout barcha akkauntlarda bajariladi.
+    """
+    for key in [k for k in list(_user_clients.keys()) if k[0] == user_id]:
+        user_lock = get_user_lock(*key)
+        async with user_lock:
+            client = _user_clients.pop(key, None)
+            _client_last_used.pop(key, None)
+            if client and client.is_connected:
+                try:
+                    await asyncio.wait_for(client.disconnect(), timeout=10.0)
+                except Exception:
+                    pass
+
+
+async def remove_account_slot(user_id: int, slot: int) -> bool:
+    """Slot'ni o'chiradi: clientni yopadi, fayllarni o'chiradi, metallamadan olib tashlaydi.
+
+    Agar o'chirilayotkan slot faol bo'lsa — boshqa slotga o'tadi.
+    Faqat 2+ akkaunt bo'lganda chaqiriladi (UI darajasida tekshiriladi).
+    """
+    accounts = get_accounts(user_id)
+    if not any(a["slot"] == slot for a in accounts):
+        return False
+    if len(accounts) <= 1:
+        return False
+
+    # Clientni yopish
+    await close_user_client_slot(user_id, slot)
+
+    # Session fayllarini o'chirish (arxivga emas — to'liq o'chirish, user so'rovi)
+    for ext in (".session", ".session-journal", ".session-wal", ".session-shm"):
+        p = _session_name(user_id, slot) + ext
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception as e:
+            logger.warning(f"remove_account_slot: fayl o'chirilmadi ({p}): {e}")
+
+    # Metallamadan olib tashlash
+    data = _load_accounts_data(user_id)
+    data.get("accounts", {}).pop(str(slot), None)
+    if str(data.get("active_slot")) == str(slot):
+        remaining = list(data.get("accounts", {}).keys())
+        data["active_slot"] = int(remaining[0]) if remaining else 0
+    _save_accounts_data(user_id, data)
+    return True
+
+
+async def close_user_client_slot(user_id: int, slot: int):
+    """Muayyan slot clientini yopadi."""
+    key = (user_id, slot)
+    user_lock = get_user_lock(user_id, slot)
     async with user_lock:
-        client = _user_clients.pop(user_id, None)
-        _client_last_used.pop(user_id, None)
+        client = _user_clients.pop(key, None)
+        _client_last_used.pop(key, None)
         if client and client.is_connected:
             try:
                 await asyncio.wait_for(client.disconnect(), timeout=10.0)
-            except:
-                pass
-async def close_user_client(user_id: int):
-    """Force clear user client from memory cache - CRITICAL for logout security"""
-    user_lock = get_user_lock(user_id)
-    async with user_lock:
-        client = _user_clients.pop(user_id, None)
-        _client_last_used.pop(user_id, None)
-        if client and client.is_connected:
-            try:
-                await asyncio.wait_for(client.disconnect(), timeout=10.0)
-            except:
+            except Exception:
                 pass
 
 
