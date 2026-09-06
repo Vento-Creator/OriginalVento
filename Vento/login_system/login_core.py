@@ -105,26 +105,8 @@ class SessionManager:
                 if os.path.exists(path):
                     os.remove(path)
             except Exception:
-                pass
+                                pass
     
-    def move_session_to_final(self, user_id: int) -> bool:
-        """Atomically promote a verified pending session to the final session path."""
-        src = os.path.join(self.pending_dir, f"user_{user_id}.session")
-        dst = os.path.join(self.sessions_dir, f"user_{user_id}.session")
-        try:
-            if not os.path.exists(src):
-                return False
-            os.replace(src, dst)
-
-            src_j = src + "-journal"
-            dst_j = dst + "-journal"
-            if os.path.exists(src_j):
-                os.replace(src_j, dst_j)
-            return True
-        except Exception as e:
-            logger.warning("Session move error: %s", e)
-            return False
-
     def session_exists(self, user_id: int) -> bool:
         """Check if session file exists"""
         session_path = self.get_final_session_path(user_id) + ".session"
@@ -837,8 +819,9 @@ class AuthManager:
                 except Exception:
                     pass
             
-            # Move session to final directory (overwrites existing session if present)
-            if not self.session_manager.move_session_to_final(user_id):
+                        # Move session to final directory (overwrites existing session if present)
+            from session_manager import move_session_to_final as _move_session_to_final
+            if not _move_session_to_final(user_id):
                 raise SessionError("Sessiya faylini ko'chirishda xatolik")
 
             # Persist which api_id/api_hash pair created this session so that

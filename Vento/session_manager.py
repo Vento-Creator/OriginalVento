@@ -214,8 +214,36 @@ def get_slot_by_tg_id(user_id: int, tg_id: int):
     return None
 
 
-def pop_pending_confirmation(user_id: int):
-    return _pending_account_confirmations.pop(user_id, None)
+def get_add_slot_target(user_id: int) -> int:
+    """Login jarayonida qo'shilayotgan slot-ni qaytaradi (0 = asosiy)."""
+    # _add_slot_targets lug'ati login_handlers.py da set_add_slot() bilan to'ldiriladi.
+    return _add_slot_targets.get(user_id, 0)
+
+
+def move_session_to_final(user_id: int) -> bool:
+    """Pending sessiyani (asosiy yoki slot) final joyiga ko'chiradi.
+    
+    Multi-account paytida slot mavjud bo'lsa — user_{id}_acc_{slot}.session,
+    aks holda — user_{id}.session fayliga.
+    """
+    try:
+        slot = get_add_slot_target(user_id)  # session_manager.py da bor
+        src = os.path.join(SESSIONS_DIR, "pending", f"user_{user_id}.session")
+        dst = _session_name(user_id, slot) + ".session" if slot else os.path.join(SESSIONS_DIR, f"user_{user_id}.session")
+        if os.path.exists(src):
+            # final joydagi faylga aloqador lock yoki journal ham ko'chirilsin
+            import shutil
+            shutil.move(src, dst)
+            # journal/wal/shm ham ko'chirilsin (SQLite/WAL rejim uchun)
+            for ext in ("-wal", "-shm", "-journal"):
+                s = src + ext
+                d = dst + ext
+                if os.path.exists(s):
+                    shutil.move(s, d)
+        return True
+    except Exception as e:
+        logger.warning(f"move_session_to_final: {e}")
+        return False
 
 
 def remove_slot_files(user_id: int, slot: int):
