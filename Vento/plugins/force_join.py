@@ -518,10 +518,11 @@ async def admin_fj_del_callback(client: Client, cq):
     if 0 <= idx < len(channels):
         removed = channels.pop(idx)
         await set_force_channels(channels)
-        _chat_info_cache.pop(removed, None)
+        # removed endi dict (id/name) — keshdan id bo'yicha o'chiriladi
+        _chat_info_cache.pop(removed.get("id", removed), None)
         try:
             from database import log_admin_action
-            await log_admin_action(cq.from_user.id, "force_join_del_channel", None, removed)
+            await log_admin_action(cq.from_user.id, "force_join_del_channel", None, str(removed.get("id", removed)))
         except Exception:
             pass
         await cq.answer("🗑 Kanal o'chirildi", show_alert=True)
