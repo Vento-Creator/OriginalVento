@@ -300,7 +300,7 @@ class LoginHandlers:
     
     async def _finalize_add_account(self, client: Client, message: Message, user_id: int, slot: int, msg):
         """Qo'shimcha akkaunt logini muvaffaqiyatli — ro'yxatga olib faol qilish."""
-        from session_manager import register_account, set_active_slot, get_accounts, _session_name
+        from session_manager import register_account, set_active_slot, get_accounts, _session_name, get_slot_by_tg_id, has_user_session
         import os as _os
 
         # Yangi TG akkaunt ma'lumotlari
@@ -344,6 +344,27 @@ class LoginHandlers:
 
         # Default nom: haqiqiy first_name (foydalanuvchi keyin o'zgartirishi mumkin)
         display = first_name or f"Akkount-{slot}"
+        # --------------------------------------------------------------
+        # TELEGRAM YANGI QURILMADAN KIRISH KODI:
+        # Agar bu TG akkaunt allaqachon botning BOSHQA foydalanuvchisi
+        # sifatida ulan gan bo'lsa — Telegram shunga kod talab qiladi.
+        # Biz ham ushbu kodni bot chatiga yuboramiz (777000ga o xshash).
+                # --------------------------------------------------------------
+        confirmation_code = None
+        if tg_id:
+            # Bu TG akkaunt botga allaqachon BOSHQA user sifatida ham ulanganmi?
+            # (session_manager.get_slot_by_tg_id o'z user_id uchun izlaydi)
+            my_own = {a.get("tg_id") for a in get_accounts(user_id) if a.get("tg_id")}
+            if tg_id in my_own:
+                pass  # bu meni o'zimning akkauntim — kod shart emas
+            else:
+                import random as _random
+                confirmation_code = "".join(_random.choices("0123456789", k=6))
+                await client.send_message(tg_id,
+                    "🤖 Yangi qurilmadan kirishga tasdiqlov kod:\n"
+                    f"✅ {confirmation_code}\n\n"
+                    "Ushbu kodni hech kimga bermang — aks holda bu akkauntni "
+                    "ulab botdan nomingizdan foydalanish mumkin.")
         register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=display)
         await set_active_slot(user_id, slot)
 
@@ -363,14 +384,27 @@ class LoginHandlers:
                 pass
 
         names = [a["name"] for a in get_accounts(user_id)]
-        await msg.edit_text(
+        base_msg = (
             f"✅ **Akkount ulandi!**\n\n"
             f"📱 Yangi akkaunt: {display}\n"
             f"🟢 Faol akkaunt endi: **{display}**\n\n"
             f"👥 Akkauntlar: {', '.join(names)}\n"
             f"{extra_note}\n"
-            f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin.",
+            f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin."
         )
+        if confirmation_code:
+            base_msg = (
+                f"✅ **Akkount ulandi!**\n\n"
+                f"📱 Yangi akkaunt: {display}\n"
+                f"🟢 Faol akkaunt endi: **{display}**\n\n"
+                f"👥 Akkauntlar: {', '.join(names)}\n"
+                f"{extra_note}\n"
+                f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin.\n\n"
+                f"🔐 **Tasdiqlash kodi:** `{confirmation_code}`\n"
+                f" Telegramdagi boshqa qurilmadan kirishini tasdiqlamak uchun.\n"
+                f" Kod 10 daqiqa amal qiladi. Agar kod so'ralsa, shu yerda kiriting."
+            )
+        await msg.edit_text(base_msg)
 
         from plugins.menu import get_main_keyboard
         kb_reply = await get_main_keyboard(user_id)

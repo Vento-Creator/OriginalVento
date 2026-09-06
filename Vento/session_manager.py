@@ -172,6 +172,62 @@ def has_active_sessions(user_id: int) -> bool:
             return True
     return os.path.exists(os.path.join(SESSIONS_DIR, f"user_{user_id}.session"))
 
+
+# ---------------------------------------------------------------------------
+# Qo'shimcha akkaunt logini uchun tasdiqlash kodi.
+# Agar qo'shilayotgan TG akkaunt allaqachon botning faol useri bo'lsa —
+# haqiqiy qurilmadagi bot chatiga kod yuboriladi (Telegram yangi qurilmadan
+# kirishda kod so'ragani kabi), kod 10 daqiqa amal qiladi.
+# ---------------------------------------------------------------------------
+
+ACCOUNT_CONFIRM_TTL = 600  # 10 daqiqa (soniya)
+
+_pending_account_confirmations = {}  # user_id -> {"slot", "code", "tg_id", "first_name", "created"}
+
+
+def set_pending_confirmation(user_id: int, slot: int, code: str, tg_id=None, first_name=None):
+    _pending_account_confirmations[user_id] = {
+        "slot": int(slot),
+        "code": str(code),
+        "tg_id": tg_id,
+        "first_name": first_name,
+        "created": time.time(),
+    }
+
+
+def get_pending_confirmation(user_id: int):
+    return _pending_account_confirmations.get(user_id)
+    return _pending_account_confirmations.get(user_id)
+
+def has_user_session(user_id: int) -> bool:
+    """Bu user_id (asosiy bot foydalanuvchi) session faylga ega?"""
+    try:
+        return os.path.exists(os.path.join(SESSIONS_DIR, f"user_{user_id}.session"))
+    except Exception:
+        return False
+
+def get_slot_by_tg_id(user_id: int, tg_id: int):
+    """Berilgan user_id uchun tg_id moslashgan slot-ni qaytaradi (yoki None)."""
+    for acc in get_accounts(user_id):
+        if acc.get("tg_id") == tg_id:
+            return acc
+    return None
+
+
+def pop_pending_confirmation(user_id: int):
+    return _pending_account_confirmations.pop(user_id, None)
+
+
+def remove_slot_files(user_id: int, slot: int):
+    """Slot session fayllarini o'chiradi (bekor qilingan/muddati tugagan loginlar uchun)."""
+    for ext in (".session", ".session-journal", ".session-wal", ".session-shm"):
+        p = _session_name(user_id, slot) + ext
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception as e:
+            logger.warning(f"remove_slot_files: {p}: {e}")
+
 def get_user_lock(user_id: int, slot: int = 0) -> asyncio.Lock:
     """Returns a unique lock for the given user_id+slot."""
     key = (user_id, slot)
