@@ -611,7 +611,8 @@ async def users_row_exists(user_id: int) -> bool:
     """
     async with get_db_connection() as db:
         async with db.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            return await cursor.fetchone() is not None
+            row = await cursor.fetchone()
+            return row is not None
 
 
 async def remove_user(user_id):
