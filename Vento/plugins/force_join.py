@@ -244,16 +244,22 @@ def _error_screen_for(user_id: int):
 
 async def enforce_force_join(client: Client, message: Message) -> bool:
     """/start gate. True = o'tdi; False = ekrani ko'rsatildi (handler to'xtatsin)."""
+    uid = message.from_user.id
     try:
-        if not await is_force_join_enabled():
+        enabled = await is_force_join_enabled()
+        channels = await get_force_channels()
+        logger.info(f"[FORCE_JOIN] /start by {uid}: enabled={enabled}, channels={len(channels)}")
+        if not enabled:
             return True
-    except Exception:
-        return True  # fail-open
-    status, missing, reason = await check_user_joined(client, message.from_user.id)
+    except Exception as e:
+        logger.warning(f"[FORCE_JOIN] sozlama o'qilmadi, fail-open: {e}")
+        return True
+    status, missing, reason = await check_user_joined(client, uid)
+    logger.info(f"[FORCE_JOIN] user {uid}: status={status}, missing={len(missing)}, reason={reason}")
     if status == "ok":
         return True
     if status == "error":
-        text = _error_screen_for(message.from_user.id)
+        text = _error_screen_for(uid)
         buttons = None
         logger.warning(f"force_join: tekshiruv amalga oshmadi (reason={reason})")
     else:

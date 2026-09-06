@@ -176,7 +176,9 @@ async def start_handler(client: Client, message: Message):
         # keyingi oqimga (login, menyu, h.k.) o'tkazilmaydi.
         try:
             from plugins.force_join import enforce_force_join
-            if not await enforce_force_join(client, message):
+            _fj_ok = await enforce_force_join(client, message)
+            logger.info(f"[START_TRACE] STEP2b result: force_join_ok={_fj_ok}")
+            if not _fj_ok:
                 logger.info("[START_TRACE] STEP2b: Force join gate blocked, returning")
                 # user_states'ni tozalamaymiz — user kanalga a'zo bo'lib qaytganda ochiq ekrandan davom etadi
                 return
