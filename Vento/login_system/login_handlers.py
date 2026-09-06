@@ -349,10 +349,8 @@ class LoginHandlers:
         # Agar bu TG akkaunt allaqachon botning BOSHQA foydalanuvchisi
         # sifatida ulan gan bo'lsa — Telegram shunga kod talab qiladi.
         # Biz ham ushbu kodni bot chatiga yuboramiz (777000ga o xshash).
-        # BOT akkauntlar uchun tugma orqali tasdiqlash.
                 # --------------------------------------------------------------
         confirmation_code = None
-        is_bot_account = False
         if tg_id:
             # Bu TG akkaunt botga allaqachon BOSHQA user sifatida ham ulanganmi?
             # (session_manager.get_slot_by_tg_id o'z user_id uchun izlaydi)
@@ -361,21 +359,15 @@ class LoginHandlers:
                 pass  # bu meni o'zimning akkauntim — kod shart emas
             else:
                 try:
-                    # Bot ekanligini tekshirish
-                    user = await client.get_users(tg_id)
-                    if user.is_bot:
-                        is_bot_account = True
-                        logger.info(f"add_account: tg_id {tg_id} is a bot, will use button confirmation")
-                    else:
-                        import random as _random
-                        confirmation_code = "".join(_random.choices("0123456789", k=6))
-                        await client.send_message(tg_id,
-                            "🤖 Yangi qurilmadan kirishga tasdiqlov kod:\n"
-                            f"✅ {confirmation_code}\n\n"
-                            "Ushbu kodni hech kimga bermang — aks holda bu akkauntni "
-                            "ulab botdan nomingizdan foydalanish mumkin.")
+                    import random as _random
+                    confirmation_code = "".join(_random.choices("0123456789", k=6))
+                    await client.send_message(tg_id,
+                        "🤖 Yangi qurilmadan kirishga tasdiqlov kod:\n"
+                        f"✅ {confirmation_code}\n\n"
+                        "Ushbu kodni hech kimga bermang — aks holda bu akkauntni "
+                        "ulab botdan nomingizdan foydalanish mumkin.")
                 except Exception as e:
-                    logger.warning(f"add_account: failed to check/send confirmation for {tg_id}: {e}")
+                    logger.warning(f"add_account: failed to send confirmation code to {tg_id}: {e}")
                     # Xatolik bo'lsa, kod yuborilmaydi, lekin account qo'shiladi
         
         register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=display)
@@ -419,28 +411,35 @@ class LoginHandlers:
                 f" Telegramdagi boshqa qurilmadan kirishini tasdiqlamak uchun.\n"
                 f" Kod 10 daqiqa amal qiladi. Agar kod so'ralsa, shu yerda kiriting."
             )
-        elif is_bot_account:
-            # Bot akkaunt uchun tasdiqlash tugmasi
-            from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-            import random as _random
-            confirmation_code = "".join(_random.choices("0123456789", k=6))
-            set_pending_confirmation(user_id, slot, confirmation_code, tg_id=tg_id, first_name=first_name)
-            
-            base_msg = (
-                f"✅ **Akkount ulandi!**\n\n"
-                f"📱 Yangi akkaunt: {display}\n"
-                f"🟢 Faol akkaunt endi: **{display}**\n\n"
-                f"👥 Akkauntlar: {', '.join(names)}\n"
-                f"{extra_note}\n"
-                f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin.\n\n"
-                f"🤖 Bu akkaunt **bot** hisoblanadi.\n"
-                f" Tasdiqlash uchun quyidagi tugmani bosing."
-            )
-            reply_markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Tasdiqlash kodi olish", callback_data=f"confirm_bot_add_{user_id}_{slot}")]
-            ])
         
         await msg.edit_text(base_msg, reply_markup=reply_markup)
+        
+        # Agar bu TG akkaunt allaqachon Vento foydalanuvchisi bo'lsa - unga tasdiqlash tugmasi yuborish
+        if tg_id:
+            try:
+                from database import users_row_exists
+                if await users_row_exists(tg_id):
+                    import random as _random
+                    confirm_code = "".join(_random.choices("0123456789", k=6))
+                    set_pending_confirmation(user_id, slot, confirm_code, tg_id=tg_id, first_name=first_name)
+                    
+                    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    confirm_kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("✅ Ulashishga ruxsat berish", callback_data=f"approve_link_{user_id}_{slot}")]
+                    ])
+                    
+                    await client.send_message(
+                        tg_id,
+                        f"� **Yangi qurilma ulash so'rovi**\n\n"
+                        f"👤 Sizning akkauntingiz boshqa qurilmadan ulanmoqchi.\n"
+                        f"📱 Akkaunt: {display}\n"
+                        f"🆔 User ID: {user_id}\n\n"
+                        f"Agar bu siz bo'lsangiz, quyidagi tugmani bosing.",
+                        reply_markup=confirm_kb
+                    )
+                    logger.info(f"add_account: sent confirmation button to existing user {tg_id} for linking by {user_id}")
+            except Exception as e:
+                logger.warning(f"add_account: failed to send confirmation to existing user {tg_id}: {e}")
 
         from plugins.menu import get_main_keyboard
         kb_reply = await get_main_keyboard(user_id)
@@ -969,23 +968,19 @@ async def admin_invoice_callback(client: Client, callback_query: CallbackQuery):
     target_id = int(callback_query.matches[0].group(1))
 
 
-@Client.on_callback_query(filters.regex(r"^confirm_bot_add_(\d+)_(\d+)$"))
+@Client.on_callback_query(filters.regex(r"^approve_link_(\d+)_(\d+)$"))
 @handle_errors("login", "user_id", auto_retry=False)
-async def confirm_bot_add_callback(client: Client, callback_query: CallbackQuery):
-    """Handle bot account confirmation button - show the verification code"""
-    logger.info(f"[DIAG] confirm_bot_add_callback entered: callback_data={callback_query.data}")
+async def approve_link_callback(client: Client, callback_query: CallbackQuery):
+    """Handle account linking approval from existing user"""
+    logger.info(f"[DIAG] approve_link_callback entered: callback_data={callback_query.data}")
     try:
-        user_id = int(callback_query.matches[0].group(1))
+        requester_user_id = int(callback_query.matches[0].group(1))
         slot = int(callback_query.matches[0].group(2))
-        
-        # Only the user who added the account can see the code
-        if callback_query.from_user.id != user_id:
-            await callback_query.answer("❌ Siz bu akkauntni qo'shgansiz emassiz!", show_alert=True)
-            return
+        approver_user_id = callback_query.from_user.id
         
         # Get pending confirmation
         from session_manager import get_pending_confirmation
-        pending = get_pending_confirmation(user_id)
+        pending = get_pending_confirmation(requester_user_id)
         
         if not pending or pending.get("slot") != slot:
             await callback_query.answer("❌ Tasdiqlash ma'lumotlari topilmadi yoki muddati tugagan.", show_alert=True)
@@ -994,28 +989,42 @@ async def confirm_bot_add_callback(client: Client, callback_query: CallbackQuery
         # Check if expired (10 minutes)
         import time
         if time.time() - pending.get("created", 0) > ACCOUNT_CONFIRM_TTL:
-            await callback_query.answer("❌ Tasdiqlash kodi muddati tugagan (10 daqiqa).", show_alert=True)
+            await callback_query.answer("❌ Tasdiqlash so'rovi muddati tugagan (10 daqiqa).", show_alert=True)
             return
         
+        # Verify the approver is the account owner (tg_id matches)
+        if pending.get("tg_id") != approver_user_id:
+            await callback_query.answer("❌ Siz bu akkaunt egasi emassiz!", show_alert=True)
+            return
+        
+        # Show the verification code to the requester
         code = pending.get("code")
         
-        # Show the code
-        from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        new_text = (
-            f"✅ **Akkount ulandi!**\n\n"
-            f"📱 Akkaunt: {pending.get('first_name') or f'Akkount-{slot}'}\n"
-            f"🟢 Faol akkaunt endi: {pending.get('first_name') or f'Akkount-{slot}'}\n\n"
-            f"🤖 Bu akkaunt **bot** hisoblanadi.\n\n"
-            f"🔐 **Tasdiqlash kodi:** `{code}`\n"
-            f" Telegramdagi boshqa qurilmadan kirishini tasdiqlamak uchun.\n"
-            f" Kod 10 daqiqa amal qiladi. Agar kod so'ralsa, shu yerda kiriting."
-        )
+        # Send code to the requester
+        try:
+            from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            await client.send_message(
+                requester_user_id,
+                f"✅ **Ulashish tasdiqlandi!**\n\n"
+                f"� Akkaunt: {pending.get('first_name') or f'Akkount-{slot}'}\n\n"
+                f"🔐 **Tasdiqlash kodi:** `{code}`\n"
+                f" Telegramdagi boshqa qurilmadan kirishini tasdiqlamak uchun.\n"
+                f" Kod 10 daqiqa amal qiladi. Agar kod so'ralsa, shu yerda kiriting."
+            )
+        except Exception as e:
+            logger.error(f"approve_link_callback: failed to send code to requester {requester_user_id}: {e}")
         
-        await callback_query.message.edit_text(new_text)
-        await callback_query.answer("✅ Tasdiqlash kodi ko'rsatildi")
+        # Update the approver's message
+        await callback_query.message.edit_text(
+            f"✅ **Ulashishga ruxsat berildi!**\n\n"
+            f"📱 Akkaunt: {pending.get('first_name') or f'Akkount-{slot}'}\n"
+            f"🆔 User ID: {requester_user_id}\n\n"
+            f"Tasdiqlash kodi yuborildi."
+        )
+        await callback_query.answer("✅ Ulashishga ruxsat berildi")
         
     except Exception as e:
-        logger.error(f"[DIAG] confirm_bot_add_callback error: {e}", exc_info=True)
+        logger.error(f"[DIAG] approve_link_callback error: {e}", exc_info=True)
         await callback_query.answer(f"❌ Xatolik: {e}", show_alert=True)
 
 
