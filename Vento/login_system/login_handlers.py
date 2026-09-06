@@ -343,7 +343,7 @@ class LoginHandlers:
                 return
 
         # Default nom: haqiqiy first_name (foydalanuvchi keyin o'zgartirishi mumkin)
-        display = first_name or f"Akkount-{slot}"
+        # name parametrini None qoldiramiz, shunda register_account first_name ni ishlatadi
         # --------------------------------------------------------------
         # TELEGRAM YANGI QURILMADAN KIRISH KODI:
         # Agar bu TG akkaunt allaqachon botning BOSHQA foydalanuvchisi
@@ -369,11 +369,11 @@ class LoginHandlers:
                 except Exception as e:
                     logger.warning(f"add_account: failed to send confirmation code to {tg_id}: {e}")
                     # Xatolik bo'lsa, kod yuborilmaydi, lekin account qo'shiladi
-        
-        register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=display)
+
+        register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=None)
         await set_active_slot(user_id, slot)
 
-        logger.info(f"add_account: user {user_id} added slot {slot} (tg_id={tg_id}, name={display})")
+        logger.info(f"add_account: user {user_id} added slot {slot} (tg_id={tg_id}, first_name={first_name})")
 
         # Agar bu TG akkaunt botga BOSHQA user sifatida ham ulangan bo'lsa — ogohlantirish
         extra_note = ""
@@ -389,10 +389,11 @@ class LoginHandlers:
                 pass
 
         names = [a["name"] for a in get_accounts(user_id)]
+        display_name = first_name or f"Akkount-{slot}"
         base_msg = (
             f"✅ **Akkount ulandi!**\n\n"
-            f"📱 Yangi akkaunt: {display}\n"
-            f"🟢 Faol akkaunt endi: **{display}**\n\n"
+            f"📱 Yangi akkaunt: {display_name}\n"
+            f"🟢 Faol akkaunt endi: **{display_name}**\n\n"
             f"👥 Akkauntlar: {', '.join(names)}\n"
             f"{extra_note}\n"
             f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin."
@@ -402,8 +403,8 @@ class LoginHandlers:
         if confirmation_code:
             base_msg = (
                 f"✅ **Akkount ulandi!**\n\n"
-                f"📱 Yangi akkaunt: {display}\n"
-                f"🟢 Faol akkaunt endi: **{display}**\n\n"
+                f"📱 Yangi akkaunt: {display_name}\n"
+                f"🟢 Faol akkaunt endi: **{display_name}**\n\n"
                 f"👥 Akkauntlar: {', '.join(names)}\n"
                 f"{extra_note}\n"
                 f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin.\n\n"
