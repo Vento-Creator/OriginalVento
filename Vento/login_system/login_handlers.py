@@ -300,8 +300,8 @@ class LoginHandlers:
     
     async def _finalize_add_account(self, client: Client, message: Message, user_id: int, slot: int, msg):
         """Qo'shimcha akkaunt logini muvaffaqiyatli — ro'yxatga olib faol qilish."""
-        from session_manager import register_account, set_active_slot, get_accounts
-        import session_manager as sm
+        from session_manager import register_account, set_active_slot, get_accounts, _session_name
+        import os as _os
 
         # Yangi TG akkaunt ma'lumotlari
         tg_id = None
@@ -314,20 +314,61 @@ class LoginHandlers:
         except Exception as e:
             logger.warning(f"add_account: get_me failed: {e}")
 
+        # --------------------------------------------------------------
+        # DUPLIKAT HIMOYA: bu TG akkaunt allaqachon boshqa slot'da bormi?
+        # Bitta akkauntni ikki slotga qo'shsak — amallar 2 marta ishlaydi.
+        # --------------------------------------------------------------
+        if tg_id:
+            accounts = get_accounts(user_id)
+            dup = next((a for a in accounts if a.get("tg_id") and a.get("tg_id") == tg_id), None)
+            if dup:
+                # Yangi yaratilgan sessiya fayllarini o'chiramiz (slot path'ga ko'chgan)
+                for ext in (".session", ".session-journal", ".session-wal", ".session-shm"):
+                    p = _session_name(user_id, slot) + ext
+                    try:
+                        if _os.path.exists(p):
+                            _os.remove(p)
+                    except Exception:
+                        pass
+                # Faol slot o'zgarmagan (register_account chaqirilmadi)
+                logger.warning(
+                    f"add_account: user {user_id} duplicate tg_id={tg_id} (already slot {dup['slot']})"
+                )
+                await msg.edit_text(
+                    f"❌ **Bu akkaunt allaqachon ulangan!**\n\n"
+                    f"📱 Nomi: {dup['name']}\n\n"
+                    f"Bitta Telegram akkauntni ikki marta qo'shib bo'lmaydi — "
+                    f"amallar 2 marta ishlab ketishi mumkin.",
+                )
+                return
+
         # Default nom: haqiqiy first_name (foydalanuvchi keyin o'zgartirishi mumkin)
-        existing = get_accounts(user_id)
         display = first_name or f"Akkount-{slot}"
         register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=display)
         await set_active_slot(user_id, slot)
 
         logger.info(f"add_account: user {user_id} added slot {slot} (tg_id={tg_id}, name={display})")
 
+        # Agar bu TG akkaunt botga BOSHQA user sifatida ham ulangan bo'lsa — ogohlantirish
+        extra_note = ""
+        if tg_id:
+            try:
+                from database import users_row_exists
+                if await users_row_exists(tg_id):
+                    extra_note = (
+                        "\nℹ️ Diqqat: bu akkaunt botga boshqa akkaunt sifatida ham ulangan "
+                        "(ikkala joyda ham ishlayveradi, lekin bilib turing)."
+                    )
+            except Exception:
+                pass
+
         names = [a["name"] for a in get_accounts(user_id)]
         await msg.edit_text(
             f"✅ **Akkount ulandi!**\n\n"
             f"📱 Yangi akkaunt: {display}\n"
             f"🟢 Faol akkaunt endi: **{display}**\n\n"
-            f"👥 Akkauntlar: {', '.join(names)}\n\n"
+            f"👥 Akkauntlar: {', '.join(names)}\n"
+            f"{extra_note}\n"
             f"💡 👤 Akkaunt → ✏️ Akkount nomlash orqali nomini o'zgartirishingiz mumkin.",
         )
 
