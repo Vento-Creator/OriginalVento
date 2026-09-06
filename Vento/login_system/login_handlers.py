@@ -360,11 +360,21 @@ class LoginHandlers:
             else:
                 import random as _random
                 confirmation_code = "".join(_random.choices("0123456789", k=6))
-                await client.send_message(tg_id,
-                    "🤖 Yangi qurilmadan kirishga tasdiqlov kod:\n"
-                    f"✅ {confirmation_code}\n\n"
-                    "Ushbu kodni hech kimga bermang — aks holda bu akkauntni "
-                    "ulab botdan nomingizdan foydalanish mumkin.")
+                try:
+                    # Botga xabar yuborishdan oldin tekshirish (USER_IS_BOT xatosi oldini olish)
+                    user = await client.get_users(tg_id)
+                    if user.is_bot:
+                        logger.warning(f"add_account: tg_id {tg_id} is a bot, skipping confirmation code")
+                        confirmation_code = None
+                    else:
+                        await client.send_message(tg_id,
+                            "🤖 Yangi qurilmadan kirishga tasdiqlov kod:\n"
+                            f"✅ {confirmation_code}\n\n"
+                            "Ushbu kodni hech kimga bermang — aks holda bu akkauntni "
+                            "ulab botdan nomingizdan foydalanish mumkin.")
+                except Exception as e:
+                    logger.warning(f"add_account: failed to send confirmation code to {tg_id}: {e}")
+                    confirmation_code = None
         register_account(user_id, slot, tg_id=tg_id, first_name=first_name, name=display)
         await set_active_slot(user_id, slot)
 
