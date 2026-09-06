@@ -209,7 +209,8 @@ async def check_user_joined(client: Client, user_id: int):
         else:
             # kanal ma'lumoti olinmadi, lekin a'zolik holati aniq — baribir ko'rsatamiz
             missing.append({"id": cid, "title": ch["name"] or cid, "url": ""})
-    return "ok", missing, ""
+    # MUHIM: missing bo'lsa status "join" bo'ladi, "ok" EMAS!
+    return ("join" if missing else "ok"), missing, ""
 
 
 def _build_screen(missing):
