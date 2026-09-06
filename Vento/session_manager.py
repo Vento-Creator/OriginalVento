@@ -179,7 +179,8 @@ def has_active_sessions(user_id: int) -> bool:
     for acc in get_accounts(user_id):
         if os.path.exists(_session_name(user_id, acc["slot"]) + ".session"):
             return True
-    return os.path.exists(os.path.join(SESSIONS_DIR, f"user_{user_id}.session"))
+    # Faqat SESSIONS_DIR dan tekshiramiz, BASE_DIR emas
+    return os.path.exists(_session_name(user_id, 0) + ".session")
 
 
 # ---------------------------------------------------------------------------
