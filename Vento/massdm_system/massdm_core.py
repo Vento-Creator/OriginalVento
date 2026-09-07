@@ -432,6 +432,13 @@ class MassDMService:
             # Final status update
             await status_callback(tracker.get_stats())
             
+            # Activity tracking - massdm statistikasini yozib qo'yish
+            try:
+                from database import record_massdm_activity
+                await record_massdm_activity(user_id, tracker.success)
+            except Exception as e:
+                logger.warning(f"MassDM activity tracking xatosi: {e}")
+            
             # Save progress to database (thread-safe)
             await self._save_progress(user_id, tracker.get_stats())
             

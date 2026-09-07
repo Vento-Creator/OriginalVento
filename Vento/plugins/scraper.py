@@ -195,6 +195,14 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
             await add_scraped_members_batch(batch)
 
         stop_flags.pop(stop_key, None)
+        
+        # Activity tracking - scraper statistikasini yozib qo'yish
+        try:
+            from database import record_scraper_activity
+            await record_scraper_activity(user_id, count)
+        except Exception as e:
+            logger.error(f"Scraper activity tracking xatosi: {e}")
+        
         await log_user_action(user_id, f"Scraper (Tezkor) ishlatdi: {count} ta a'zo yig'ildi")
 
         await status_msg.edit_text(
@@ -285,6 +293,14 @@ async def execute_msg_scrape(user_id: int, target: int, msg_limit: int, status_m
             await add_scraped_members_batch(batch)
 
         stop_flags.pop(stop_key, None)
+        
+        # Activity tracking - scraper statistikasini yozib qo'yish
+        try:
+            from database import record_scraper_activity
+            await record_scraper_activity(user_id, count)
+        except Exception as e:
+            logger.error(f"Scraper activity tracking xatosi: {e}")
+        
         await log_user_action(user_id, f"Scraper (Xabarlar orqali) ishlatdi: {count} ta a'zo yig'ildi")
 
         await status_msg.edit_text(

@@ -938,6 +938,14 @@ async def run_utag_process(client: Client, process_key: str, user_client: Client
             await asyncio.sleep(speed_seconds)
 
         tagged_count = process.get("tagged", 0)
+        
+        # Activity tracking - utag statistikasini yozib qo'yish
+        try:
+            from database import record_utag_activity
+            await record_utag_activity(user_id, tagged_count)
+        except Exception as e:
+            logger.error(f"Utag activity tracking xatosi: {e}")
+        
         await send_completion_notification(
             user_client, chat_id, tagged_count, delete_timer, show_completion
         )

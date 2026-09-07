@@ -1485,6 +1485,284 @@ async def has_accepted_chat_terms(user_id: int) -> bool:
         ) as cursor:
             return bool(await cursor.fetchone())
 
+# ---------------------------------------------------------------------------
+# User Activity Statistics (user aktivligi statistikasi)
+# ---------------------------------------------------------------------------
+
+async def create_user_activity_stats_table():
+    """User activity statistikasi jadvalini yaratish"""
+    async with get_db_connection() as db:
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS user_activity_stats (
+                user_id BIGINT PRIMARY KEY,
+                utag_count INTEGER DEFAULT 0,
+                utag_members_count INTEGER DEFAULT 0,
+                scraper_count INTEGER DEFAULT 0,
+                scraper_members_count INTEGER DEFAULT 0,
+                massdm_count INTEGER DEFAULT 0,
+                massdm_members_count INTEGER DEFAULT 0,
+                last_activity INTEGER DEFAULT 0,
+                daily_utag_count INTEGER DEFAULT 0,
+                daily_scraper_count INTEGER DEFAULT 0,
+                daily_massdm_count INTEGER DEFAULT 0,
+                daily_utag_members INTEGER DEFAULT 0,
+                daily_scraper_members INTEGER DEFAULT 0,
+                daily_massdm_members INTEGER DEFAULT 0,
+                last_daily_reset INTEGER DEFAULT 0
+            )
+        ''')
+        await db.commit()
+
+async def record_utag_activity(user_id: int, members_tagged: int):
+    """Utag amalini qayd etish"""
+    import time
+    now = int(time.time())
+    await create_user_activity_stats_table()
+    
+    async with get_db_connection() as db:
+        # Kunlik hisoblagichlarni yangilash (agar yangi kunga o'tgan bo'lsa)
+        await db.execute('''
+            UPDATE user_activity_stats 
+            SET daily_utag_count = 0, daily_scraper_count = 0, daily_massdm_count = 0,
+                daily_utag_members = 0, daily_scraper_members = 0, daily_massdm_members = 0,
+                last_daily_reset = ?
+            WHERE user_id = ? AND last_daily_reset < ?
+        ''', (now, user_id, now - 86400))
+        
+        # Asosiy statistikani yangilash
+        await db.execute('''
+            INSERT INTO user_activity_stats 
+            (user_id, utag_count, utag_members_count, last_activity, daily_utag_count, daily_utag_members, last_daily_reset)
+            VALUES (?, 1, ?, ?, 1, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                utag_count = user_activity_stats.utag_count + 1,
+                utag_members_count = user_activity_stats.utag_members_count + ?,
+                last_activity = ?,
+                daily_utag_count = user_activity_stats.daily_utag_count + 1,
+                daily_utag_members = user_activity_stats.daily_utag_members + ?
+        ''', (user_id, members_tagged, now, members_tagged, now, members_tagged, now, members_tagged))
+        await db.commit()
+
+async def record_scraper_activity(user_id: int, members_scraped: int):
+    """Scraper amalini qayd etish"""
+    import time
+    now = int(time.time())
+    await create_user_activity_stats_table()
+    
+    async with get_db_connection() as db:
+        # Kunlik hisoblagichlarni yangilash
+        await db.execute('''
+            UPDATE user_activity_stats 
+            SET daily_utag_count = 0, daily_scraper_count = 0, daily_massdm_count = 0,
+                daily_utag_members = 0, daily_scraper_members = 0, daily_massdm_members = 0,
+                last_daily_reset = ?
+            WHERE user_id = ? AND last_daily_reset < ?
+        ''', (now, user_id, now - 86400))
+        
+        await db.execute('''
+            INSERT INTO user_activity_stats 
+            (user_id, scraper_count, scraper_members_count, last_activity, daily_scraper_count, daily_scraper_members, last_daily_reset)
+            VALUES (?, 1, ?, ?, 1, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                scraper_count = user_activity_stats.scraper_count + 1,
+                scraper_members_count = user_activity_stats.scraper_members_count + ?,
+                last_activity = ?,
+                daily_scraper_count = user_activity_stats.daily_scraper_count + 1,
+                daily_scraper_members = user_activity_stats.daily_scraper_members + ?
+        ''', (user_id, members_scraped, now, members_scraped, now, members_scraped, now, members_scraped))
+        await db.commit()
+
+async def record_massdm_activity(user_id: int, members_sent: int):
+    """MassDM amalini qayd etish"""
+    import time
+    now = int(time.time())
+    await create_user_activity_stats_table()
+    
+    async with get_db_connection() as db:
+        # Kunlik hisoblagichlarni yangilash
+        await db.execute('''
+            UPDATE user_activity_stats 
+            SET daily_utag_count = 0, daily_scraper_count = 0, daily_massdm_count = 0,
+                daily_utag_members = 0, daily_scraper_members = 0, daily_massdm_members = 0,
+                last_daily_reset = ?
+            WHERE user_id = ? AND last_daily_reset < ?
+        ''', (now, user_id, now - 86400))
+        
+        await db.execute('''
+            INSERT INTO user_activity_stats 
+            (user_id, massdm_count, massdm_members_count, last_activity, daily_massdm_count, daily_massdm_members, last_daily_reset)
+            VALUES (?, 1, ?, ?, 1, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                massdm_count = user_activity_stats.massdm_count + 1,
+                massdm_members_count = user_activity_stats.massdm_members_count + ?,
+                last_activity = ?,
+                daily_massdm_count = user_activity_stats.daily_massdm_count + 1,
+                daily_massdm_members = user_activity_stats.daily_massdm_members + ?
+        ''', (user_id, members_sent, now, members_sent, now, members_sent, now, members_sent))
+        await db.commit()
+
+async def get_user_activity_stats(user_id: int):
+    """Foydalanuvchi aktivligi statistikasini olish"""
+    await create_user_activity_stats_table()
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT * FROM user_activity_stats WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "user_id": row[0],
+                    "utag_count": row[1],
+                    "utag_members_count": row[2],
+                    "scraper_count": row[3],
+                    "scraper_members_count": row[4],
+                    "massdm_count": row[5],
+                    "massdm_members_count": row[6],
+                    "last_activity": row[7],
+                    "daily_utag_count": row[8],
+                    "daily_scraper_count": row[9],
+                    "daily_massdm_count": row[10],
+                    "daily_utag_members": row[11],
+                    "daily_scraper_members": row[12],
+                    "daily_massdm_members": row[13],
+                    "last_daily_reset": row[14]
+                }
+            return None
+
+async def get_most_active_users(limit: int = 20, days: int = 7):
+    """Eng faol foydalanuvchilar (kunlik ishlatishlar asosida)"""
+    await create_user_activity_stats_table()
+    import time
+    now = int(time.time())
+    cutoff_time = now - (days * 86400)
+    
+    async with get_db_connection() as db:
+        # Faollik ballini hisoblaymiz: kunlik utag + kunlik scraper + kunlik massdm
+        async with db.execute('''
+            SELECT uas.user_id, ku.username, ku.first_name,
+                   uas.daily_utag_count, uas.daily_scraper_count, uas.daily_massdm_count,
+                   uas.utag_count, uas.scraper_count, uas.massdm_count,
+                   uas.utag_members_count, uas.scraper_members_count, uas.massdm_members_count,
+                   uas.last_activity
+            FROM user_activity_stats uas
+            LEFT JOIN known_users ku ON uas.user_id = ku.user_id
+            WHERE uas.last_activity > ?
+            ORDER BY (uas.daily_utag_count + uas.daily_scraper_count + uas.daily_massdm_count) DESC,
+                     (uas.utag_count + uas.scraper_count + uas.massdm_count) DESC
+            LIMIT ?
+        ''', (cutoff_time, limit)) as cursor:
+            rows = await cursor.fetchall()
+    
+    result = []
+    for r in rows:
+        result.append({
+            "user_id": r[0],
+            "username": r[1],
+            "first_name": r[2],
+            "daily_utag_count": r[3],
+            "daily_scraper_count": r[4],
+            "daily_massdm_count": r[5],
+            "total_utag_count": r[6],
+            "total_scraper_count": r[7],
+            "total_massdm_count": r[8],
+            "total_utag_members": r[9],
+            "total_scraper_members": r[10],
+            "total_massdm_members": r[11],
+            "last_activity": r[12],
+            "activity_score": r[3] + r[4] + r[5]  # Kunlik faollik balli
+        })
+    return result
+
+async def get_activity_by_period(period: str = "daily", limit: int = 20):
+    """Davriy bo'yicha eng faol foydalanuvchilar"""
+    await create_user_activity_stats_table()
+    
+    if period == "daily":
+        # Kunlik statistika (daily_* maydonlari)
+        async with get_db_connection() as db:
+            async with db.execute('''
+                SELECT uas.user_id, ku.username, ku.first_name,
+                       uas.daily_utag_count, uas.daily_scraper_count, uas.daily_massdm_count,
+                       uas.daily_utag_members, uas.daily_scraper_members, uas.daily_massdm_members,
+                       uas.last_activity
+                FROM user_activity_stats uas
+                LEFT JOIN known_users ku ON uas.user_id = ku.user_id
+                WHERE uas.last_daily_reset > ?
+                ORDER BY (uas.daily_utag_count + uas.daily_scraper_count + uas.daily_massdm_count) DESC
+                LIMIT ?
+            ''', (int(time.time()) - 86400, limit)) as cursor:
+                rows = await cursor.fetchall()
+    elif period == "weekly":
+        # Haftalik statistika (last_activity asosida)
+        import time
+        cutoff = int(time.time()) - (7 * 86400)
+        async with get_db_connection() as db:
+            async with db.execute('''
+                SELECT uas.user_id, ku.username, ku.first_name,
+                       uas.utag_count, uas.scraper_count, uas.massdm_count,
+                       uas.utag_members_count, uas.scraper_members_count, uas.massdm_members_count,
+                       uas.last_activity
+                FROM user_activity_stats uas
+                LEFT JOIN known_users ku ON uas.user_id = ku.user_id
+                WHERE uas.last_activity > ?
+                ORDER BY (uas.utag_count + uas.scraper_count + uas.massdm_count) DESC
+                LIMIT ?
+            ''', (cutoff, limit)) as cursor:
+                rows = await cursor.fetchall()
+    elif period == "monthly":
+        # Oylik statistika
+        import time
+        cutoff = int(time.time()) - (30 * 86400)
+        async with get_db_connection() as db:
+            async with db.execute('''
+                SELECT uas.user_id, ku.username, ku.first_name,
+                       uas.utag_count, uas.scraper_count, uas.massdm_count,
+                       uas.utag_members_count, uas.scraper_members_count, uas.massdm_members_count,
+                       uas.last_activity
+                FROM user_activity_stats uas
+                LEFT JOIN known_users ku ON uas.user_id = ku.user_id
+                WHERE uas.last_activity > ?
+                ORDER BY (uas.utag_count + uas.scraper_count + uas.massdm_count) DESC
+                LIMIT ?
+            ''', (cutoff, limit)) as cursor:
+                rows = await cursor.fetchall()
+    else:
+        return []
+    
+    result = []
+    for r in rows:
+        if period == "daily":
+            result.append({
+                "user_id": r[0],
+                "username": r[1],
+                "first_name": r[2],
+                "utag_count": r[3],
+                "scraper_count": r[4],
+                "massdm_count": r[5],
+                "utag_members": r[6],
+                "scraper_members": r[7],
+                "massdm_members": r[8],
+                "last_activity": r[9],
+                "activity_score": r[3] + r[4] + r[5]
+            })
+        else:
+            result.append({
+                "user_id": r[0],
+                "username": r[1],
+                "first_name": r[2],
+                "utag_count": r[3],
+                "scraper_count": r[4],
+                "massdm_count": r[5],
+                "utag_members": r[6],
+                "scraper_members": r[7],
+                "massdm_members": r[8],
+                "last_activity": r[9],
+                "activity_score": r[3] + r[4] + r[5]
+            })
+    return result
+            return bool(await cursor.fetchone())
+
 async def accept_chat_terms(user_id: int):
     """Chat shartlarini qabul qilish"""
     import time

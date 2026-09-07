@@ -15,18 +15,19 @@ from database import (
     clean_users_without_username, get_admin_stats,
     get_all_registered_user_ids, get_all_admins, get_admin_info,
     add_admin, remove_admin, update_admin_permission, log_admin_action,
-    get_all_complaints, get_complaint_by_id, mark_complaint_read, reply_to_complaint, get_complaint_count, get_pending_complaints, get_complaints_by_status
+    get_all_complaints, get_complaint_by_id, mark_complaint_read, reply_to_complaint, get_complaint_count, get_pending_complaints, get_complaints_by_status,
+    get_most_active_users, get_activity_by_period
 )
 import time
 import asyncio
 import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from rate_limiter import check_rate_limit
 from spambot_unlock import send_and_check_unlock, check_if_locked
 from queue_manager import get_all_active_tasks, terminate_user_task
 from config import ADMIN_REPORT_CHAT_ID
-
-logger = logging.getLogger(__name__)
 
 
 def admin_filter(_, __, message: Message):
@@ -73,6 +74,7 @@ async def admin_command_handler(client: Client, message: Message):
         [InlineKeyboardButton(get_text("tag_messages", lang), callback_data="admin_tag_messages")],
         [InlineKeyboardButton("📩 Shikoyatlar", callback_data="admin_complaints")],
         [InlineKeyboardButton("⚡️ Active User Tasks", callback_data="admin_active_tasks_0")],
+        [InlineKeyboardButton("📊 Eng faol foydalanuvchilar", callback_data="admin_active_users_daily")],
     ]
     
     if is_owner(message.from_user.id):
@@ -125,6 +127,7 @@ async def admin_panel_callback(client: Client, cq: CallbackQuery):
         [InlineKeyboardButton(get_text("tag_messages", lang), callback_data="admin_tag_messages")],
         [InlineKeyboardButton("📩 Shikoyatlar", callback_data="admin_complaints")],
         [InlineKeyboardButton("⚡️ Active User Tasks", callback_data="admin_active_tasks_0")],
+        [InlineKeyboardButton("📊 Eng faol foydalanuvchilar", callback_data="admin_active_users_daily")],
     ]
     
     if is_owner(cq.from_user.id):
@@ -477,6 +480,189 @@ async def del_member_handler(client: Client, message: Message):
         await message.reply_text("ID faqat raqam bo'lishi kerak!")
     except Exception as e:
         await message.reply_text(f"Xatolik: {e}")
+
+
+@Client.on_callback_query(filters.regex("^admin_active_users_daily$") & is_admin_callback_filter)
+async def admin_active_users_daily_callback(client: Client, cq: CallbackQuery):
+    """Kunlik eng faol foydalanuvchilarni ko'rsatish"""
+    try:
+        active_users = await get_most_active_users(limit=20, days=1)
+    except Exception as e:
+        logger.error(f"Active users error: {e}")
+        await cq.answer("Statistika olishda xatolik!", show_alert=True)
+        return
+    
+    if not active_users:
+        await cq.message.edit_text(
+            "📊 **Eng faol foydalanuvchilar (Kunlik)**\n\n📭 Hozircha ma'lumot yo'q.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")]
+            ])
+        )
+        await cq.answer()
+        return
+    
+    lines = ["📊 **Eng faol foydalanuvchilar (Kunlik)**\n\n"]
+    lines.append("🔥 **Kunlik ishlatishlar asosida tartiblangan**\n")
+    
+    for i, user in enumerate(active_users, 1):
+        user_id = user["user_id"]
+        username = user.get("username")
+        first_name = user.get("first_name")
+        
+        if username:
+            user_display = f"@{username}"
+        elif first_name:
+            user_display = first_name
+        else:
+            user_display = f"ID: {user_id}"
+        
+        activity_score = user["activity_score"]
+        daily_utag = user["daily_utag_count"]
+        daily_scraper = user["daily_scraper_count"]
+        daily_massdm = user["daily_massdm_count"]
+        
+        lines.append(
+            f"{i}. {user_display}\n"
+            f"   🏷 Kunlik utag: {daily_utag} marta\n"
+            f"   🔍 Kunlik scraper: {daily_scraper} marta\n"
+            f"   📨 Kunlik massdm: {daily_massdm} marta\n"
+            f"   📊 Faollik balli: {activity_score}\n"
+        )
+    
+    keyboard = [
+        [InlineKeyboardButton("📅 Haftalik", callback_data="admin_active_users_weekly")],
+        [InlineKeyboardButton("📆 Oylik", callback_data="admin_active_users_monthly")],
+        [InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")]
+    ]
+    
+    await cq.message.edit_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^admin_active_users_weekly$") & is_admin_callback_filter)
+async def admin_active_users_weekly_callback(client: Client, cq: CallbackQuery):
+    """Haftalik eng faol foydalanuvchilarni ko'rsatish"""
+    try:
+        active_users = await get_activity_by_period(period="weekly", limit=20)
+    except Exception as e:
+        logger.error(f"Active users error: {e}")
+        await cq.answer("Statistika olishda xatolik!", show_alert=True)
+        return
+    
+    if not active_users:
+        await cq.message.edit_text(
+            "📊 **Eng faol foydalanuvchilar (Haftalik)**\n\n📭 Hozircha ma'lumot yo'q.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")]
+            ])
+        )
+        await cq.answer()
+        return
+    
+    lines = ["📊 **Eng faol foydalanuvchilar (Haftalik)**\n\n"]
+    lines.append("🔥 **So'nggi 7 kun ichida eng ko'p ishlatganlar**\n")
+    
+    for i, user in enumerate(active_users, 1):
+        user_id = user["user_id"]
+        username = user.get("username")
+        first_name = user.get("first_name")
+        
+        if username:
+            user_display = f"@{username}"
+        elif first_name:
+            user_display = first_name
+        else:
+            user_display = f"ID: {user_id}"
+        
+        activity_score = user["activity_score"]
+        utag_count = user["utag_count"]
+        scraper_count = user["scraper_count"]
+        massdm_count = user["massdm_count"]
+        
+        lines.append(
+            f"{i}. {user_display}\n"
+            f"   🏷 Utag: {utag_count} marta\n"
+            f"   🔍 Scraper: {scraper_count} marta\n"
+            f"   📨 MassDM: {massdm_count} marta\n"
+            f"   📊 Faollik balli: {activity_score}\n"
+        )
+    
+    keyboard = [
+        [InlineKeyboardButton("📅 Kunlik", callback_data="admin_active_users_daily")],
+        [InlineKeyboardButton("📆 Oylik", callback_data="admin_active_users_monthly")],
+        [InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")]
+    ]
+    
+    await cq.message.edit_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^admin_active_users_monthly$") & is_admin_callback_filter)
+async def admin_active_users_monthly_callback(client: Client, cq: CallbackQuery):
+    """Oylik eng faol foydalanuvchilarni ko'rsatish"""
+    try:
+        active_users = await get_activity_by_period(period="monthly", limit=20)
+    except Exception as e:
+        logger.error(f"Active users error: {e}")
+        await cq.answer("Statistika olishda xatolik!", show_alert=True)
+        return
+    
+    if not active_users:
+        await cq.message.edit_text(
+            "📊 **Eng faol foydalanuvchilar (Oylik)**\n\n📭 Hozircha ma'lumot yo'q.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")]
+            ])
+        )
+        await cq.answer()
+        return
+    
+    lines = ["📊 **Eng faol foydalanuvchilar (Oylik)**\n\n"]
+    lines.append("🔥 **So'nggi 30 kun ichida eng ko'p ishlatganlar**\n")
+    
+    for i, user in enumerate(active_users, 1):
+        user_id = user["user_id"]
+        username = user.get("username")
+        first_name = user.get("first_name")
+        
+        if username:
+            user_display = f"@{username}"
+        elif first_name:
+            user_display = first_name
+        else:
+            user_display = f"ID: {user_id}"
+        
+        activity_score = user["activity_score"]
+        utag_count = user["utag_count"]
+        scraper_count = user["scraper_count"]
+        massdm_count = user["massdm_count"]
+        
+        lines.append(
+            f"{i}. {user_display}\n"
+            f"   🏷 Utag: {utag_count} marta\n"
+            f"   🔍 Scraper: {scraper_count} marta\n"
+            f"   📨 MassDM: {massdm_count} marta\n"
+            f"   📊 Faollik balli: {activity_score}\n"
+        )
+    
+    keyboard = [
+        [InlineKeyboardButton("📅 Kunlik", callback_data="admin_active_users_daily")],
+        [InlineKeyboardButton("📆 Haftalik", callback_data="admin_active_users_weekly")],
+        [InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")]
+    ]
+    
+    await cq.message.edit_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    await cq.answer()
 
 
 @Client.on_message(filters.command("free") & is_admin_filter)
