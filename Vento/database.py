@@ -1761,7 +1761,6 @@ async def get_activity_by_period(period: str = "daily", limit: int = 20):
                 "activity_score": r[3] + r[4] + r[5]
             })
     return result
-            return bool(await cursor.fetchone())
 
 async def accept_chat_terms(user_id: int):
     """Chat shartlarini qabul qilish"""
