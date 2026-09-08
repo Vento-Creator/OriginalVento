@@ -12,9 +12,9 @@ class MassDMSettings:
     # Rate limiting
     max_concurrent_massdm: int = 5
     max_massdm_per_user: int = 1
-    default_delay: float = 2.0
-    min_delay: float = 1.0
-    max_delay: float = 5.0
+    default_delay: float = 5.0
+    min_delay: float = 3.0
+    max_delay: float = 10.0
     
     # Auto-stop settings
     floodwait_auto_stop_threshold: int = 300  # seconds
