@@ -33,6 +33,7 @@ from plugins.utag import utag_timer_background_task
 from plugins.timer import shutdown_timers
 from login_system import login_service
 from service_initializer import initialize_services
+from refresh_sessions import daily_session_refresh_task
 
 app = Client(
     "empire_bot_session",
@@ -217,6 +218,10 @@ async def main():
     # Start login system cleanup task
     await _spawn_guarded("Login Cleanup", _login_cleanup_task())
     logger.info("Login system cleanup task ishga tushdi.")
+
+    # Har kuni barcha userbot sessiyalarini avtomatik yangilash (kuniga 1 marta)
+    await _spawn_guarded("Daily Session Refresh", daily_session_refresh_task())
+    logger.info("Daily session refresh (har kuni 1 marta) ishga tushdi.")
     
     try:
         await idle()
