@@ -85,6 +85,13 @@ CREATE TABLE IF NOT EXISTS known_users (
     language TEXT DEFAULT 'uz'
 );
 
+-- Tasdiqlash kutilayotgan login so'rovlari (Navbatdagilar)
+CREATE TABLE IF NOT EXISTS pending_approvals (
+    user_id BIGINT PRIMARY KEY,
+    created_at BIGINT DEFAULT 0,
+    phone TEXT
+);
+
 -- Yangilanishlar
 CREATE TABLE IF NOT EXISTS updates (
     id SERIAL PRIMARY KEY,

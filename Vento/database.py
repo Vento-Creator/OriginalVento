@@ -588,6 +588,11 @@ async def add_or_update_user(user_id, expiry_date, username=None, first_name=Non
             VALUES ($1, $2, FALSE, $3, $4, 1)
             ON CONFLICT(user_id) DO UPDATE SET expiry_date = $5, warned = FALSE, username = $6, first_name = $7, is_active = 1
         ''', (user_id, expiry_date, username, first_name, expiry_date, username, first_name))
+        # User tasdiqlandi/obuna oldi — Navbatdagilar ro'yxatidan olib tashlaymiz
+        try:
+            await db.execute("DELETE FROM pending_approvals WHERE user_id = $1", (user_id,))
+        except Exception:
+            pass
         await db.commit()
 
 async def set_user_active_status(user_id: int, is_active: bool) -> bool:
@@ -1053,16 +1058,9 @@ async def get_user_funnel_stats() -> dict:
     Jami  — barcha ma'lum foydalanuvchilar (start bosganlar + tasdiqlanganlar).
     Boshlang'ich  — /start bosgan yoki login boshlagan, lekin login tugatmaganlar.
     O'rta (middle) — login tugatgan, admin tasdiqlashini kutayotganlar
-        (session fayli bor, lekin hali users jadvalida yo'q).
+        (Navbatdagilar — pending_approvals ro'yxatida bor, lekin hali users jadvalida yo'q).
     Muvaffaqiyatli — nomer ulab, tasdiqlashdan o'tganlar (users jadvalida bor).
-
-    "O'rta" toifasi botning STEP6a mantiqiga mos: session fayli mavjud, ammo
-    users jadvalida qator yo'q. Session fayllari faqat server diskida saqlanadi,
-    shuning uchun bu funksiya faqat bot ishlayotgan serverda chaqirilishi kerak.
     """
-    import os
-    from config import SESSIONS_DIR
-
     async with get_db_connection() as db:
         async with db.execute("SELECT user_id FROM known_users") as cursor:
             known_rows = await cursor.fetchall()
@@ -1072,25 +1070,14 @@ async def get_user_funnel_stats() -> dict:
     known_ids = {r[0] for r in known_rows}
     approved_ids = {r[0] for r in user_rows}
 
-    # Login tugatganlar: session fayli bor (asosiy slot, `user_<id>.session`).
-    # `_acc_` slotlari va logged_out/ arxivi hisobga olinmaydi.
-    session_ids = set()
-    try:
-        for fname in os.listdir(SESSIONS_DIR):
-            if fname.startswith("user_") and fname.endswith(".session"):
-                try:
-                    uid = int(fname[len("user_"):-len(".session")])
-                    session_ids.add(uid)
-                except ValueError:
-                    continue
-    except OSError:
-        pass
+    pending = await get_pending_approvals()
+    middle_ids = {p["user_id"] for p in pending}
 
     total_ids = known_ids | approved_ids
 
     total = len(total_ids)
     successful = len(approved_ids)
-    middle = len(session_ids - approved_ids)  # sessiya bor, tasdiqlanmagan
+    middle = len(middle_ids - approved_ids)  # tasdiqlanmagan navbatdagilar
     beginner = max(0, total - successful - middle)  # start bosgan, hali tugatmagan
 
     return {
@@ -1099,6 +1086,115 @@ async def get_user_funnel_stats() -> dict:
         "middle": middle,
         "successful": successful,
     }
+
+
+# ---------------------------------------------------------------------------
+# Navbatdagilar — tasdiqlash kutilayotgan login so'rovlari (pending_approvals)
+# ---------------------------------------------------------------------------
+
+async def _ensure_pending_approvals_table():
+    """pending_approvals jadvalini yaratish (Supabase/PostgreSQL)."""
+    async with get_db_connection() as db:
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS pending_approvals (
+                user_id BIGINT PRIMARY KEY,
+                created_at BIGINT DEFAULT 0,
+                phone TEXT
+            )
+        ''')
+        await db.commit()
+
+
+async def add_pending_approval(user_id: int, phone: str = None) -> bool:
+    """Login tugatgan, lekin tasdiqlanmagan foydalanuvchini Navbatga qo'shish."""
+    try:
+        await _ensure_pending_approvals_table()
+        import time
+        now = int(time.time())
+        async with get_db_connection() as db:
+            await db.execute('''
+                INSERT INTO pending_approvals (user_id, created_at, phone)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id) DO UPDATE SET created_at = $2, phone = $3
+            ''', (user_id, now, phone))
+            await db.commit()
+        return True
+    except Exception as e:
+        logger.warning(f"add_pending_approval ({user_id}) xatolik: {e}")
+        return False
+
+
+async def remove_pending_approval(user_id: int) -> bool:
+    """Tasdiqlandi/rad etildi/chiqdi — Navbatdan olib tashlash."""
+    try:
+        await _ensure_pending_approvals_table()
+        async with get_db_connection() as db:
+            await db.execute("DELETE FROM pending_approvals WHERE user_id = $1", (user_id,))
+            await db.commit()
+        return True
+    except Exception as e:
+        logger.warning(f"remove_pending_approval ({user_id}) xatolik: {e}")
+        return False
+
+
+def _session_file_pending_ids() -> set:
+    """Eski (backfill) uchun: session fayli bor userlar (asosiy slot)."""
+    import os
+    from config import SESSIONS_DIR
+    session_ids = set()
+    try:
+        for fname in os.listdir(SESSIONS_DIR):
+            if fname.startswith("user_") and fname.endswith(".session") and "_acc_" not in fname:
+                try:
+                    session_ids.add(int(fname[len("user_"):-len(".session")]))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return session_ids
+
+
+async def get_pending_approvals() -> list:
+    """Tasdiqlash kutilayotgan foydalanuvchilar ro'yxati.
+
+    Asosiy manba: pending_approvals jadvali.
+    Agar jadval bo'sh bo'lsa, serverdagi session fayllariga qarab eski
+    kutayotganlar (masalan bot bilan boshqa usulda login qilganlar) ham
+    backfill qilinadi — shunda mavjud statistikalar yo'qolmaydi.
+    """
+    await _ensure_pending_approvals_table()
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT user_id, created_at, phone FROM pending_approvals ORDER BY created_at ASC"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    if rows:
+        return [{"user_id": r[0], "created_at": r[1] or 0, "phone": r[2]} for r in rows]
+
+    # Backfill: session fayli bor, lekin users jadvalida yo'q userlar
+    session_ids = _session_file_pending_ids()
+    async with get_db_connection() as db:
+        async with db.execute("SELECT user_id FROM users") as cursor:
+            user_rows = await cursor.fetchall()
+    approved_ids = {r[0] for r in user_rows}
+
+    pending = sorted(session_ids - approved_ids)
+    result = []
+    import time
+    now = int(time.time())
+    for uid in pending:
+        try:
+            async with get_db_connection() as db:
+                await db.execute('''
+                    INSERT INTO pending_approvals (user_id, created_at, phone)
+                    VALUES ($1, $2, NULL) ON CONFLICT (user_id) DO NOTHING
+                ''', (uid, now))
+                await db.commit()
+        except Exception as e:
+            logger.warning(f"backfill pending_approvals ({uid}): {e}")
+        result.append({"user_id": uid, "created_at": 0, "phone": None})
+    return result
 
 async def get_user_full_profile(user_id: int):
     """Foydalanuvchi haqida to'liq ma'lumot"""

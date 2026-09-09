@@ -63,6 +63,7 @@ async def admin_command_handler(client: Client, message: Message):
 
     keyboard = [
         [InlineKeyboardButton(get_text("manage_users", lang), callback_data="adm_users_0")],
+        [InlineKeyboardButton("⏳ Navbatdagilar", callback_data="admin_queue")],
         [InlineKeyboardButton(get_text("search_user", lang), callback_data="adm_search")],
         [InlineKeyboardButton(get_text("recent_actions", lang), callback_data="adm_acts_list_0")],
         [InlineKeyboardButton(get_text("statistics", lang), callback_data="admin_stats")],
@@ -118,6 +119,7 @@ async def admin_panel_callback(client: Client, cq: CallbackQuery):
 
     keyboard = [
         [InlineKeyboardButton(get_text("manage_users", lang), callback_data="adm_users_0")],
+        [InlineKeyboardButton("⏳ Navbatdagilar", callback_data="admin_queue")],
         [InlineKeyboardButton(get_text("search_user", lang), callback_data="adm_search")],
         [InlineKeyboardButton(get_text("recent_actions", lang), callback_data="adm_acts_list_0")],
         [InlineKeyboardButton(get_text("statistics", lang), callback_data="admin_stats")],

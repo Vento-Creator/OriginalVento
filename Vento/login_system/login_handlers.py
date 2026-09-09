@@ -269,6 +269,9 @@ class LoginHandlers:
             # is_active=0 until an admin approves them (handle_admin_approve),
             # otherwise they could bypass the approval gate entirely.
             try:
+                # Admin avtomatik tasdiqlanyapti — Navbatda qoldirilmasin
+                from database import remove_pending_approval
+                await remove_pending_approval(user_id)
                 await LoginDatabaseAdapter.set_user_active_status(user_id, True)
             except Exception as e:
                 logger.error(f"CRITICAL: Failed to set user active in DB on login for user {user_id}: {e}")
@@ -286,6 +289,12 @@ class LoginHandlers:
             # Regular user - wait for admin approval
             user_states[user_id] = "waiting_for_admin_approval"
             logger.info(f"Regular user {user_id} waiting for admin approval.")
+            # Navbatga qo'shish (admin panel "Navbatdagilar" bo'limi uchun)
+            try:
+                from database import add_pending_approval
+                await add_pending_approval(user_id)
+            except Exception as e:
+                logger.warning(f"add_pending_approval failed for {user_id}: {e}")
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(LoginConstants.BUTTON_CHECK_APPROVAL, callback_data="check_login_approval")]
             ])
@@ -619,6 +628,13 @@ class LoginHandlers:
         from database import grant_subscription
         await grant_subscription(target_id, 30)
 
+        # Navbatdagilardan olib tashlash (tasdiqlandi)
+        try:
+            from database import remove_pending_approval
+            await remove_pending_approval(target_id)
+        except Exception as e:
+            logger.warning(f"remove_pending_approval on approve ({target_id}): {e}")
+
         user_states.pop(target_id, None)
         await self._edit_approval_messages(client, target_id, final_text, reply_markup=None, callback_query=callback_query)
 
@@ -688,6 +704,13 @@ class LoginHandlers:
             await client.send_message(target_id, self.settings.messages["rejected"])
         except Exception:
             pass
+
+        # Navbatdagilardan olib tashlash (rad etildi)
+        try:
+            from database import remove_pending_approval
+            await remove_pending_approval(target_id)
+        except Exception as e:
+            logger.warning(f"remove_pending_approval on reject ({target_id}): {e}")
 
         await callback_query.answer("Rad etildi!", show_alert=True)
         self.approval_messages.pop(target_id, None)
@@ -967,6 +990,7 @@ async def admin_invoice_callback(client: Client, callback_query: CallbackQuery):
     """Handle admin sending invoice"""
     logger.info(f"[DIAG] admin_invoice_callback entered: callback_data={callback_query.data}")
     target_id = int(callback_query.matches[0].group(1))
+    await login_handlers.handle_admin_invoice(client, callback_query, target_id)
 
 
 @Client.on_callback_query(filters.regex(r"^approve_link_(\d+)_(\d+)$"))

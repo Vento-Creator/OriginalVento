@@ -5,6 +5,7 @@ from config import is_admin, SESSIONS_DIR, user_states, can_manage_users
 from database import (
     get_all_registered_user_ids, search_users, get_user_full_profile,
     get_admin_stats, get_user_funnel_stats, get_all_banned_users,
+    get_pending_approvals, get_known_user,
     add_or_update_user, remove_user, add_free_user, remove_free_user,
     add_violation, remove_ban, delete_user_databases, delete_scraped_group,
     get_group_member_count, get_members_by_group_paginated, get_group_info,
@@ -159,6 +160,69 @@ async def admin_stats_callback(client: Client, cq: CallbackQuery):
             InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
         ]])
     )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^admin_queue(_refresh)?$") & is_admin_cb)
+async def admin_queue_callback(client: Client, cq: CallbackQuery):
+    """Navbatdagilar — tasdiqlash kutilayotgan foydalanuvchilar ro'yxati.
+
+    Har bir foydalanuvchi uchun: ✅ Tasdiqlash / ❌ Rad etish / 💳 Faktura.
+    Tasdiqlansa yoki rad etilsa ro'yxatdan avtomatik o'chadi (pending_approvals).
+    """
+    if not await can_manage_users(cq.from_user.id):
+        await cq.answer("❌ Sizda bu amallni bajarish uchun Foydalanuvchilarni boshqarish yo'q!", show_alert=True)
+        return
+
+    pending = await get_pending_approvals()
+
+    if not pending:
+        await cq.message.edit_text(
+            "⏳ **Navbatdagilar**\n\n✅ Hozircha tasdiqlash kutilayotgan foydalanuvchi yo'q.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")
+            ]])
+        )
+        await cq.answer()
+        return
+
+    now = int(time.time())
+    lines = ["⏳ **Navbatdagilar — tasdiqlash kutilmoqda:**\n"]
+    buttons = []
+
+    for i, p in enumerate(pending[:10], 1):
+        uid = p["user_id"]
+        created = p.get("created_at") or 0
+
+        name = ""
+        try:
+            known = await get_known_user(uid)
+            if known:
+                name = known.get("first_name") or known.get("username") or ""
+        except Exception:
+            pass
+
+        wait = ""
+        if created:
+            mins = max(0, (now - created) // 60)
+            if mins < 60:
+                wait = f" • {mins} daq. kutilmoqda"
+            elif mins < 1440:
+                wait = f" • {mins // 60} soat kutilmoqda"
+            else:
+                wait = f" • {mins // 1440} kun kutilmoqda"
+
+        lines.append(f"{i}. {name or 'Foydalanuvchi'} (`{uid}`){wait}")
+        buttons.append([
+            InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_approve_{uid}"),
+            InlineKeyboardButton("❌ Rad etish", callback_data=f"admin_reject_{uid}"),
+            InlineKeyboardButton("💳 Faktura", callback_data=f"admin_invoice_{uid}"),
+        ])
+
+    buttons.append([InlineKeyboardButton("🔄 Yangilash", callback_data="admin_queue_refresh")])
+    buttons.append([InlineKeyboardButton("🔙 Admin panel", callback_data="menu_admin")])
+
+    await cq.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
     await cq.answer()
 
 

@@ -83,6 +83,13 @@ async def logout_callback(client: Client, callback_query: CallbackQuery):
             logger.info("Logout: No active session file to archive for user %s", user_id)
     except Exception as e:
         logger.warning("Failed to archive session files on logout: %s", e)
+
+    # 7. Navbatdagilar ro'yxatidan olib tashlash (agar kutilmagan holatda qolgan bo'lsa)
+    try:
+        from database import remove_pending_approval
+        await remove_pending_approval(user_id)
+    except Exception as e:
+        logger.warning("Failed to remove pending approval on logout: %s", e)
     # NOTE: The API map entry is intentionally KEPT — the archived
     # session may have been created with a rotated API pair, and
     # get_archived_user_client() needs that entry to reconnect successfully.
