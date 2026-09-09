@@ -28,6 +28,12 @@ from config import SESSIONS_DIR, API_ID, API_HASH
 DAILY_REFRESH_HOUR = int(os.getenv("SESSION_REFRESH_HOUR", "4"))
 DAILY_REFRESH_MINUTE = int(os.getenv("SESSION_REFRESH_MINUTE", "0"))
 
+# Bot start qilinganda (deploy'dan keyin ham) 1 marta avtomatik ishga tushirish:
+#   SESSION_REFRESH_ON_STARTUP     -> "1"/"0" (default: 1 = yoqilgan)
+#   SESSION_REFRESH_STARTUP_DELAY  -> necha soniyadan keyin (default: 120 = 2 daqiqa)
+RUN_ON_STARTUP = os.getenv("SESSION_REFRESH_ON_STARTUP", "1").strip().lower() not in ("0", "false", "no")
+STARTUP_DELAY = int(os.getenv("SESSION_REFRESH_STARTUP_DELAY", "120"))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -118,26 +124,55 @@ async def daily_session_refresh_task():
 
     Vaqt UTC bo'yicha SESSION_REFRESH_HOUR / SESSION_REFRESH_MINUTE
     environment o'zgaruvchilari orqali sozlanadi (default: 04:00 UTC).
-    Bot (main.py) ishga tushganda bu task avtomatik start qilinadi — alohida
-    cron/fon serveri shart emas.
+
+    Bot (main.py) ishga tushganda bu task avtomatik start qilinadi:
+      - deploy/bot start qilinganda 1 marta (SESSION_REFRESH_STARTUP_DELAY dan keyin),
+      - keyin har kuni rejalashtirilgan vaqtda 1 marta.
     """
     logger.info(
         f"=== Daily Session Refresh Task boshlandi "
-        f"(har kuni {DAILY_REFRESH_HOUR:02d}:{DAILY_REFRESH_MINUTE:02d} UTC) ==="
+        f"(har kuni {DAILY_REFRESH_HOUR:02d}:{DAILY_REFRESH_MINUTE:02d} UTC; "
+        f"startda: {'ha' if RUN_ON_STARTUP else 'yoq'}) ==="
     )
+    startup_done = False
     while True:
         try:
             now = datetime.now(timezone.utc)
-            next_run = now.replace(
-                hour=DAILY_REFRESH_HOUR,
-                minute=DAILY_REFRESH_MINUTE,
-                second=0,
-                microsecond=0,
-            )
-            if next_run <= now:
-                next_run += timedelta(days=1)
 
-            wait_seconds = int((next_run - now).total_seconds())
+            if RUN_ON_STARTUP and not startup_done:
+                # Deploy/bot start qilinganda 1 marta ishga tushirish
+                startup_done = True
+                logger.info(
+                    f"Deploy/start refresh: {STARTUP_DELAY} soniyadan keyin "
+                    f"1 marta ishga tushiriladi..."
+                )
+                await asyncio.sleep(STARTUP_DELAY)
+                logger.info("=== Deploy/start sessiya yangilash boshlandi ===")
+                await refresh_all_sessions()
+                logger.info("=== Deploy/start sessiya yangilash tugadi ===")
+                now = datetime.now(timezone.utc)
+                # Bugungi jadvalga takror tushmaslik: reja vaqti juda yaqin bo'lsa ertaga surish
+                next_run = now.replace(
+                    hour=DAILY_REFRESH_HOUR,
+                    minute=DAILY_REFRESH_MINUTE,
+                    second=0,
+                    microsecond=0,
+                )
+                if next_run <= now:
+                    next_run += timedelta(days=1)
+                if (next_run - now).total_seconds() < 1800:  # 30 daqiqadan kam bo'lsa
+                    next_run += timedelta(days=1)
+            else:
+                next_run = now.replace(
+                    hour=DAILY_REFRESH_HOUR,
+                    minute=DAILY_REFRESH_MINUTE,
+                    second=0,
+                    microsecond=0,
+                )
+                if next_run <= now:
+                    next_run += timedelta(days=1)
+
+            wait_seconds = max(1, int((next_run - now).total_seconds()))
             logger.info(
                 f"Keyingi avtomatik sessiya yangilash: {next_run.isoformat()} "
                 f"({wait_seconds // 3600} soat {(wait_seconds % 3600) // 60} daqiqa keyin)"
