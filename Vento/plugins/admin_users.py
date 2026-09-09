@@ -187,7 +187,10 @@ async def admin_queue_callback(client: Client, cq: CallbackQuery):
         return
 
     now = int(time.time())
-    lines = ["⏳ **Navbatdagilar — tasdiqlash kutilmoqda:**\n"]
+    lines = [
+        "⏳ **Navbatdagilar — tasdiqlash kutilmoqda:**\n",
+        "ℹ️ Tugmalar ro'yxat raqami bilan: ✅ = Tasdiqlash, ❌ = Rad etish, 💳 = Faktura\n",
+    ]
     buttons = []
 
     for i, p in enumerate(pending[:10], 1):
@@ -213,10 +216,12 @@ async def admin_queue_callback(client: Client, cq: CallbackQuery):
                 wait = f" • {mins // 1440} kun kutilmoqda"
 
         lines.append(f"{i}. {name or 'Foydalanuvchi'} (`{uid}`){wait}")
+        # Tugmalarga ro'yxat raqamini qo'shamiz — qaysi tugma qaysi user'ga
+        # tegishli ekanini darhol ko'rish uchun.
         buttons.append([
-            InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_approve_{uid}"),
-            InlineKeyboardButton("❌ Rad etish", callback_data=f"admin_reject_{uid}"),
-            InlineKeyboardButton("💳 Faktura", callback_data=f"admin_invoice_{uid}"),
+            InlineKeyboardButton(f"✅ {i}", callback_data=f"admin_approve_{uid}"),
+            InlineKeyboardButton(f"❌ {i}", callback_data=f"admin_reject_{uid}"),
+            InlineKeyboardButton(f"💳 {i}", callback_data=f"admin_invoice_{uid}"),
         ])
 
     buttons.append([InlineKeyboardButton("🔄 Yangilash", callback_data="admin_queue_refresh")])
