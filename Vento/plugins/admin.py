@@ -51,7 +51,7 @@ async def admin_command_handler(client: Client, message: Message):
     funnel = await get_user_funnel_stats()
 
     text = (
-        f"⚙️ **{get_text('admin_panel', lang)}**\n\n"
+        f"**{get_text('admin_panel', lang)}**\n\n"
         f"👥 Jami: **{funnel['total']}** ta • ✅ Tasdiqlangan: **{funnel['successful']}** ta\n"
         f"🟡 Tasdiqlash kutilmoqda: **{funnel['middle']}** ta • 🟣 Boshlang'ich: **{funnel['beginner']}** ta\n"
         f"{get_text('active_subs', lang)}: **{stats['active_subs']}** ta\n"
@@ -106,7 +106,7 @@ async def admin_panel_callback(client: Client, cq: CallbackQuery):
     funnel = await get_user_funnel_stats()
 
     text = (
-        f"⚙️ **{get_text('admin_panel', lang)}**\n\n"
+        f"**{get_text('admin_panel', lang)}**\n\n"
         f"👥 Jami: **{funnel['total']}** ta • ✅ Tasdiqlangan: **{funnel['successful']}** ta\n"
         f"🟡 Tasdiqlash kutilmoqda: **{funnel['middle']}** ta • 🟣 Boshlang'ich: **{funnel['beginner']}** ta\n"
         f"{get_text('active_subs', lang)}: **{stats['active_subs']}** ta\n"
