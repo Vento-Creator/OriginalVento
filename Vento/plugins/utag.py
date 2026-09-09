@@ -636,8 +636,12 @@ async def custom_utag_command_handler(client: Client, message: Message):
         if "CHANNEL_INVALID" in error_str or "CHANNEL_PRIVATE" in error_str:
             logger.info(f"[UTAG_DEBUG] User not member of group or group not found (peer resolution) | chat_id={chat_id}")
             await message.reply_text(
-                "❌ **Guruh topilmadi yoki siz a'zo emas!**\n\n"
-                "Iltimos, avval shu guruhga a'zo bo'ling va qaytadan urinib ko'ring."
+                "❌ **Sizning userbot sessiyangiz guruhda access yo'q!**\n\n"
+                "Siz o'zingiz guruhda bo'lishingiz mumkin, lekin botning userbot akkaunti guruhda emas.\n\n"
+                "🔧 **Yechim:**\n"
+                "1. Botga qayta kiring va 'Akkauntni qayta ulash' tugmasini bosing\n"
+                "2. Yoki sessiyani yangilang (log out log in)\n\n"
+                "Bu muammo odatda sessiya eskirganda yoki keyinroq guruhga qo'shilganda yuz beradi."
             )
             raise ContinuePropagation
         logger.debug(f"[UTAG_DEBUG] STEP 8.5: peer resolution skipped for chat_id={chat_id}: {e}")
@@ -703,8 +707,12 @@ async def custom_utag_command_handler(client: Client, message: Message):
         if "CHANNEL_INVALID" in error_str or "CHANNEL_PRIVATE" in error_str:
             logger.info(f"[UTAG_DEBUG] User not member of group or group not found | chat_id={chat_id}")
             await message.reply_text(
-                "❌ **Guruh topilmadi yoki siz a'zo emas!**\n\n"
-                "Iltimos, avval shu guruhga a'zo bo'ling va qaytadan urinib ko'ring."
+                "❌ **Sizning userbot sessiyangiz guruhda access yo'q!**\n\n"
+                "Siz o'zingiz guruhda bo'lishingiz mumkin, lekin botning userbot akkaunti guruhda emas.\n\n"
+                "🔧 **Yechim:**\n"
+                "1. Botga qayta kiring va 'Akkauntni qayta ulash' tugmasini bosing\n"
+                "2. Yoki sessiyani yangilang (log out log in)\n\n"
+                "Bu muammo odatda sessiya eskirganda yoki keyinroq guruhga qo'shilganda yuz beradi."
             )
             raise ContinuePropagation
         
