@@ -857,6 +857,34 @@ class AuthManager:
                 # Don't fail login if database save fails
                 logger.warning("Database save failed (non-critical): %s", db_error)
             
+            # Auto-refresh session to get full access to groups
+            try:
+                logger.info(f"Auto-refreshing session for user {user_id} to get full group access...")
+                
+                # Clientni olish va connect qilish
+                from session_manager import get_user_client
+                temp_client = await get_user_client(user_id)
+                
+                if temp_client and not temp_client.is_connected:
+                    await temp_client.connect()
+                
+                # Dialoglarni yuklash (yangi guruhlarga access olish uchun)
+                try:
+                    dialogs = await temp_client.get_dialogs(limit=100)
+                    logger.info(f"User {user_id} uchun {len(dialogs)} ta dialog yuklandi (full access)")
+                except Exception as dialog_error:
+                    logger.warning(f"Dialoglarni yuklashda xatolik: {dialog_error}")
+                
+                # Clientni disconnect qilish (session fayli saqlanadi)
+                if temp_client.is_connected:
+                    await temp_client.disconnect()
+                
+                logger.info(f"User {user_id} sessiyasi muvaffaqiyatli refresh qilindi")
+                
+            except Exception as refresh_error:
+                logger.warning(f"Auto-refreshda xatolik (non-critical): {refresh_error}")
+                # Login muvaffaqiyatli bo'lishi uchun refresh xatosini e'tiborsiz qoldiramiz
+            
             return True
             
         except Exception as e:
