@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Dict, Optional, Tuple
 
-from config import is_admin, SUPER_ADMIN_ID
+from config import is_admin, SUPER_ADMIN_ID, ADMIN_IDS
 from database import get_db_connection
 from pyrogram.types import CallbackQuery, Message
 
@@ -390,7 +390,7 @@ async def gate_feature(event, feature: str) -> bool:
     Handler'lar boshida chaqiriladi. True = ishga ruxsat, False = cheklangan
     (kerak bo'lsa '🚫 cheklangan' xabari yuboriladi, flood bo'lsa jim).
 
-    Faqat OWNER (SUPER_ADMIN_ID) cheklovlardan mustasno — adminlar va oddiy
+    OWNER va ADMIN lar cheklovlardan mustasno — adminlar va oddiy
     userlarning funksiyalari owner tomonidan boshqariladi (flaglar orqali).
     """
     if feature not in FEATURES:
@@ -402,6 +402,10 @@ async def gate_feature(event, feature: str) -> bool:
         return True
 
     if is_owner(user_id):
+        return True
+    
+    # Adminlarni ham cheklovlardan mustasno qilish
+    if is_admin(user_id):
         return True
 
     try:
