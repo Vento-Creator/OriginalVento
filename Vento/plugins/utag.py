@@ -632,6 +632,14 @@ async def custom_utag_command_handler(client: Client, message: Message):
         await user_client.resolve_peer(chat_id)
         logger.info(f"[UTAG_DEBUG] STEP 8.5: peer resolved for chat_id={chat_id}")
     except Exception as e:
+        error_str = str(e).upper()
+        if "CHANNEL_INVALID" in error_str or "CHANNEL_PRIVATE" in error_str:
+            logger.info(f"[UTAG_DEBUG] User not member of group or group not found (peer resolution) | chat_id={chat_id}")
+            await message.reply_text(
+                "❌ **Guruh topilmadi yoki siz a'zo emas!**\n\n"
+                "Iltimos, avval shu guruhga a'zo bo'ling va qaytadan urinib ko'ring."
+            )
+            raise ContinuePropagation
         logger.debug(f"[UTAG_DEBUG] STEP 8.5: peer resolution skipped for chat_id={chat_id}: {e}")
         # Continue anyway - let get_chat_members handle it
     
@@ -689,7 +697,18 @@ async def custom_utag_command_handler(client: Client, message: Message):
         # Log the FULL traceback to see the actual root cause
         logger.error(f"[UTAG_ROOT_CAUSE] Exception in get_chat_members | chat_id={chat_id}")
         logger.exception(f"[UTAG_ROOT_CAUSE] Full traceback:")
-        raise  # Re-raise to see the actual exception
+        
+        # Check for specific Telegram errors
+        error_str = str(e).upper()
+        if "CHANNEL_INVALID" in error_str or "CHANNEL_PRIVATE" in error_str:
+            logger.info(f"[UTAG_DEBUG] User not member of group or group not found | chat_id={chat_id}")
+            await message.reply_text(
+                "❌ **Guruh topilmadi yoki siz a'zo emas!**\n\n"
+                "Iltimos, avval shu guruhga a'zo bo'ling va qaytadan urinib ko'ring."
+            )
+            raise ContinuePropagation
+        
+        raise  # Re-raise other exceptions
     
     logger.info(f"[UTAG_DEBUG] STEP 9: members loaded count={len(members)}")
     
