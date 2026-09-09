@@ -869,9 +869,13 @@ class AuthManager:
                     await temp_client.connect()
                 
                 # Dialoglarni yuklash (yangi guruhlarga access olish uchun)
+                # Eslatma: pyrotgfork 2.2.24 da get_dialogs async generator
+                # qaytaradi — await emas, async for bilan o'qiladi.
                 try:
-                    dialogs = await temp_client.get_dialogs(limit=100)
-                    logger.info(f"User {user_id} uchun {len(dialogs)} ta dialog yuklandi (full access)")
+                    dialog_count = 0
+                    async for _dialog in temp_client.get_dialogs(limit=100):
+                        dialog_count += 1
+                    logger.info(f"User {user_id} uchun {dialog_count} ta dialog yuklandi (full access)")
                 except Exception as dialog_error:
                     logger.warning(f"Dialoglarni yuklashda xatolik: {dialog_error}")
                 

@@ -57,9 +57,13 @@ async def refresh_user_session(user_id: int) -> bool:
         logger.info(f"User {user_id} (slot {slot}) client ulandi")
 
         # Dialoglarni yuklash (yangi guruhlarga access olish uchun)
+        # Eslatma: pyrotgfork 2.2.24 da get_dialogs async generator qaytaradi —
+        # await emas, async for bilan o'qiladi.
         try:
-            dialogs = await client.get_dialogs(limit=100)
-            logger.info(f"User {user_id} uchun {len(dialogs)} ta dialog yuklandi")
+            dialog_count = 0
+            async for _dialog in client.get_dialogs(limit=100):
+                dialog_count += 1
+            logger.info(f"User {user_id} uchun {dialog_count} ta dialog yuklandi")
         except Exception as e:
             logger.warning(f"User {user_id} dialoglarni yuklashda xatolik: {e}")
 
