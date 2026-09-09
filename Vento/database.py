@@ -1046,6 +1046,60 @@ async def get_admin_stats():
             stats["active_subs"] = row[0] if row else 0
         return stats
 
+
+async def get_user_funnel_stats() -> dict:
+    """Foydalanuvchilar haqida statistika (4 toifa).
+
+    Jami  — barcha ma'lum foydalanuvchilar (start bosganlar + tasdiqlanganlar).
+    Boshlang'ich  — /start bosgan yoki login boshlagan, lekin login tugatmaganlar.
+    O'rta (middle) — login tugatgan, admin tasdiqlashini kutayotganlar
+        (session fayli bor, lekin hali users jadvalida yo'q).
+    Muvaffaqiyatli — nomer ulab, tasdiqlashdan o'tganlar (users jadvalida bor).
+
+    "O'rta" toifasi botning STEP6a mantiqiga mos: session fayli mavjud, ammo
+    users jadvalida qator yo'q. Session fayllari faqat server diskida saqlanadi,
+    shuning uchun bu funksiya faqat bot ishlayotgan serverda chaqirilishi kerak.
+    """
+    import os
+    from config import SESSIONS_DIR
+
+    async with get_db_connection() as db:
+        async with db.execute("SELECT user_id FROM known_users") as cursor:
+            known_rows = await cursor.fetchall()
+        async with db.execute("SELECT user_id FROM users") as cursor:
+            user_rows = await cursor.fetchall()
+
+    known_ids = {r[0] for r in known_rows}
+    approved_ids = {r[0] for r in user_rows}
+
+    # Login tugatganlar: session fayli bor (asosiy slot, `user_<id>.session`).
+    # `_acc_` slotlari va logged_out/ arxivi hisobga olinmaydi.
+    session_ids = set()
+    try:
+        for fname in os.listdir(SESSIONS_DIR):
+            if fname.startswith("user_") and fname.endswith(".session"):
+                try:
+                    uid = int(fname[len("user_"):-len(".session")])
+                    session_ids.add(uid)
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+
+    total_ids = known_ids | approved_ids
+
+    total = len(total_ids)
+    successful = len(approved_ids)
+    middle = len(session_ids - approved_ids)  # sessiya bor, tasdiqlanmagan
+    beginner = max(0, total - successful - middle)  # start bosgan, hali tugatmagan
+
+    return {
+        "total": total,
+        "beginner": beginner,
+        "middle": middle,
+        "successful": successful,
+    }
+
 async def get_user_full_profile(user_id: int):
     """Foydalanuvchi haqida to'liq ma'lumot"""
     known = await get_known_user(user_id)

@@ -4,7 +4,7 @@ from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineK
 from config import is_admin, SESSIONS_DIR, user_states, can_manage_users
 from database import (
     get_all_registered_user_ids, search_users, get_user_full_profile,
-    get_admin_stats, get_all_banned_users,
+    get_admin_stats, get_user_funnel_stats, get_all_banned_users,
     add_or_update_user, remove_user, add_free_user, remove_free_user,
     add_violation, remove_ban, delete_user_databases, delete_scraped_group,
     get_group_member_count, get_members_by_group_paginated, get_group_info,
@@ -138,9 +138,14 @@ async def admin_stats_callback(client: Client, cq: CallbackQuery):
         await cq.answer("❌ Sizda bu amallni bajarish uchun Foydalanuvchilarni boshqarish yo'q!", show_alert=True)
         return
     stats = await get_admin_stats()
+    funnel = await get_user_funnel_stats()
     text = (
-        "📊 **Admin Statistika**\n\n"
-        f"👥 Jami ma'lum foydalanuvchilar: **{stats['total_known']}** ta\n"
+        "📊 **Foydalanuvchilar statistikasi**\n\n"
+        f"👥 Jami (ma'lum foydalanuvchilar): **{funnel['total']}** ta\n"
+        f"🟣 Boshlang'ich (start bosgan, login tugatmagan): **{funnel['beginner']}** ta\n"
+        f"🟡 O'rta (login tugatgan, tasdiqlash kutilmoqda): **{funnel['middle']}** ta\n"
+        f"✅ Muvaffaqiyatli (tasdiqlangan): **{funnel['successful']}** ta\n\n"
+        "📊 **Umumiy statistika**\n\n"
         f"✅ Faol obunalar: **{stats['active_subs']}** ta\n"
         f"📋 Obuna yozuvlari: **{stats['subscribed']}** ta\n"
         f"🆓 Bepul (VIP): **{stats['free']}** ta\n"

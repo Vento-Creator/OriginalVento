@@ -13,6 +13,7 @@ from database import (
     get_all_scraped_groups_admin, get_group_member_count,
     get_group_info, delete_scraped_group, get_user_info_from_scraped,
     clean_users_without_username, get_admin_stats,
+    get_user_funnel_stats,
     get_all_registered_user_ids, get_all_admins, get_admin_info,
     add_admin, remove_admin, update_admin_permission, log_admin_action,
     get_all_complaints, get_complaint_by_id, mark_complaint_read, reply_to_complaint, get_complaint_count, get_pending_complaints, get_complaints_by_status,
@@ -47,10 +48,12 @@ async def admin_command_handler(client: Client, message: Message):
     lang = user.get("language", "uz") if user else "uz"
     
     stats = await get_admin_stats()
+    funnel = await get_user_funnel_stats()
 
     text = (
         f"⚙️ **{get_text('admin_panel', lang)}**\n\n"
-        f"{get_text('total_users', lang)}: **{stats['total_known']}** ta\n"
+        f"👥 Jami: **{funnel['total']}** ta • ✅ Tasdiqlangan: **{funnel['successful']}** ta\n"
+        f"🟡 Tasdiqlash kutilmoqda: **{funnel['middle']}** ta • 🟣 Boshlang'ich: **{funnel['beginner']}** ta\n"
         f"{get_text('active_subs', lang)}: **{stats['active_subs']}** ta\n"
         f"{get_text('free_users', lang)}: **{stats['free']}** ta\n"
         f"{get_text('banned_users', lang)}: **{stats['banned']}** ta\n"
@@ -100,10 +103,12 @@ async def admin_panel_callback(client: Client, cq: CallbackQuery):
     lang = user.get("language", "uz") if user else "uz"
     
     stats = await get_admin_stats()
+    funnel = await get_user_funnel_stats()
 
     text = (
         f"⚙️ **{get_text('admin_panel', lang)}**\n\n"
-        f"{get_text('total_users', lang)}: **{stats['total_known']}** ta\n"
+        f"👥 Jami: **{funnel['total']}** ta • ✅ Tasdiqlangan: **{funnel['successful']}** ta\n"
+        f"🟡 Tasdiqlash kutilmoqda: **{funnel['middle']}** ta • 🟣 Boshlang'ich: **{funnel['beginner']}** ta\n"
         f"{get_text('active_subs', lang)}: **{stats['active_subs']}** ta\n"
         f"{get_text('free_users', lang)}: **{stats['free']}** ta\n"
         f"{get_text('banned_users', lang)}: **{stats['banned']}** ta\n"
