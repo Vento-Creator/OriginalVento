@@ -430,10 +430,26 @@ async def giveaway_private_cmd(client: Client, message: Message):
     if not is_bot_admin(uid):
         await message.reply_text("❌ Bu bo'lim faqat adminlar uchun.")
         return
-    if _find_active_by_creator(uid):
-        await message.reply_text(
-            "⚠️ Sizda allaqachon faol konkurs bor. Avval uni yakunlang yoki bekor qiling."
+    active = _find_active_by_creator(uid)
+    if active:
+        # Faol konkurs bo'lsa — menyu ko'rsatiladi, bloklanmaydi
+        cid = active["id"]
+        text = (
+            "⚠️ Sizda allaqachon **faol konkurs bor**:\n\n"
+            f"📛 **{active['name']}**\n"
+            f"🏆 {active['prize']}\n"
+            f"🧩 {active['ctype']} | 📊 {len(active.get('participants', {}))} ishtirokchi\n"
         )
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("📜 Boshqaruv paneli", callback_data=f"gw_panel_{cid}"),
+                    InlineKeyboardButton("❌ Bekor qilish", callback_data=f"gw_cancel_{cid}"),
+                ],
+                [InlineKeyboardButton("➕ Yangi konkurs yaratish", callback_data="gw_new")],
+            ]
+        )
+        await message.reply_text(text, reply_markup=kb)
         return
     _wizard[uid] = {
         "creator_id": uid,
