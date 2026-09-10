@@ -499,7 +499,7 @@ async def _ensure_channel(c: dict):
     try:
         chat = await uc.create_channel(
             DEFAULT_CHANNEL_TITLE,
-            about=f"🎁 Konkurs: {c['name']}",
+            description=f"🎁 Konkurs: {c['name']}",
         )
         c["channel_id"] = chat.id
         c["channel_title"] = chat.title
