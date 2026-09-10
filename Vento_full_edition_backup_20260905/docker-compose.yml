@@ -1,0 +1,13 @@
+services:
+  vento:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VENTO_DATA_DIR: /app/data
+    volumes:
+      - vento_data:/app/data
+
+volumes:
+  vento_data:
