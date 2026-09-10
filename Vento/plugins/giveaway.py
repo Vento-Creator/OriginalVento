@@ -552,6 +552,9 @@ async def _post_battle_participant(uc, c: dict, seq: int, p: dict):
     text = _render_template(
         c.get("template", DEFAULT_TEMPLATE), seq, p.get("name"), p.get("username"), p.get("user_id")
     )
+    # 📊 Jami ball — post pastiga qo'shish
+    total = p.get("points", 0)
+    text += f"\n\n📊 **Jami: {total} ball**"
     msg = await uc.send_message(c["channel_id"], text)
     p["message_id"] = msg.id
     _save()
@@ -877,19 +880,76 @@ async def gw_end_cb(client: Client, cq: CallbackQuery):
         await cq.answer("❌ Konkurs faol emas", show_alert=True)
         return
     winner = await _finish_contest(c)
+
+    await _publish_final_results(client, cq.message, c, winner)
+
+    await cq.answer("🏁 Yakunlandi")
+
+
+async def _publish_final_results(client: Client, orig_msg, c: dict, winner: dict | None):
+    """Konkurs yakunlandi, natijalar ro'yxati kanalga + panelga xabar sifatida."""
+    parts = list(c["participants"].items())
+    # balllar boyicha kamayish tartibida sort
+    key = "points" if c["ctype"] == "battle" else "votes"
+    parts.sort(key=lambda kv: kv[1].get(key, 0), reverse=True)
+
+    header = (
+        "🎉 **KONKURS YAKUNLANDI!**\n"
+        f"📛 **{c['name']}**\n"
+        f"🏆 **Sovrin:** {c['prize']}\n\n"
+    )
+
+    if not parts:
+        result_lines: list[str] = ["🚫 Ishtirokchi bo'lmadi."]
+    else:
+        result_lines = []
+        for i, (seq, p) in enumerate(parts, start=1):
+            sc = p.get(key, 0)
+            result_lines.append(f"{i}. {_participant_label(p)} — {sc} ball")
+
+    # paneldagi xabarni tahrirlang
     if winner:
-        score = winner.get("points") or winner.get("votes") or 0
-        text = (
-            "🎉 **KONKURS YAKUNLANDI!**\n\n"
-            f"📛 **{c['name']}**\n"
-            f"🏆 **Sovrin:** {c['prize']}\n\n"
-            f"🏆 **G'olib:** {_participant_label(winner)}\n"
-            f"📊 **Ball/Ovoz:** {score}"
+        score = winner.get(key, 0)
+        panel_text = (
+            header
+            + f"🏆 **G'olib:** {_participant_label(winner)}\n"
+            + f"📊 **Ball/Ovoz:** {score}\n\n"
         )
     else:
-        text = "🎉 Konkurs yakunlandi, lekin ishtirokchi bo'lmadi."
-    await cq.message.edit_text(text)
-    await cq.answer("🏁 Yakunlandi")
+        panel_text = header + "🚫 G'olib topilmadi.\n\n"
+    panel_text += "\n".join(result_lines)
+
+    try:
+        await orig_msg.edit_text(panel_text)
+    except Exception:
+        pass
+
+    # natijalarni ana dastlab kanalga yuboramiz (agar channel_id bor bo'lsa)
+    if c.get("channel_id"):
+        from session_manager import get_user_client
+        try:
+            uc = await get_user_client(c["creator_id"])
+        except Exception:
+            uc = None
+        if uc:
+            await _send_split_messages(uc, c["channel_id"], header, result_lines, panel_text)
+
+
+async def _send_split_messages(client: Client, chat_id, header: str, lines: list[str], full: str):
+    """Har bir xabar ~2000 belgiga mos ravishcha 2–3 xabarga bo'linadi."""
+    chunks: list[str] = []
+    cur = header
+    for line in lines:
+        candidate = f"{cur}\n{line}" if cur else line
+        if len(candidate) > 1950:
+            chunks.append(cur)
+            cur = line
+        else:
+            cur = candidate
+    if cur:
+        chunks.append(cur)
+    for ch in chunks:
+        await client.send_message(chat_id, ch)
 
 
 @Client.on_callback_query(filters.regex("^gw_cancel_(\\d+)$"))
