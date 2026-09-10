@@ -1008,8 +1008,6 @@ async def _count_comments(uc, channel_id: int, message_id: int, me_id: int) -> i
     unique = set()
     try:
         async for m in uc.get_chat_history(channel_id, limit=200):
-            if m.id == message_id:
-                continue
             if getattr(m, "reply_to_message_id", None) != message_id:
                 continue
             if m.sender_chat is not None:
