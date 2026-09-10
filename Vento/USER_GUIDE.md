@@ -493,38 +493,70 @@ Botdan cheksiz foydalanish uchun obuna sotib olish.
 - Admin ga murojaat qiling
 - Yangi obuna sotib oling
 
-## 🎁 GIVEAWAY / KONKURS — Guruhda Avtomatik Konkurs
+## 🎁 GIVEAWAY / KONKURS — To'liq Konkurs Tizimi
 
 ### Nima uchun kerak?
 
-Guruh a'zolari uchun konkurs (giveaway) o'tkazib, ishtirokchilarni yig'ish va g'olibni tasodifiy aniqlash imkonini beradi.
+Guruh/kanal a'zolari uchun professional konkurs o'tkazish: ishtirokchilarni yig'ish, ball/ovoz hisoblash va g'olibni aniqlash.
 
-### Qanday ishlaydi?
+### Konkurs yaratish (7 bosqichli wizard)
 
-1. Guruhda **guruh admini** quyidagi buyruqni yozadi:
+1. Guruhda `/giveaway` yozing yoki botga o'tib `/giveaway` yuboring
+2. Bot ketma-ket so'raydi:
+   - 📛 **Konkurs nomi**
+   - 📝 **Konkurs matni** (premium emoji qo'llab-quvvatlanadi, `/skip` bilan o'tkazib yuborish mumkin)
+   - 🏆 **Sovrin** (premium emoji va havolalar qo'llab-quvvatlanadi)
+   - 👥 **Ishtirokchilar soni** (raqam yoki cheksiz uchun `/skip`)
+   - 🕐 **Boshlanish vaqti** (`YYYY-MM-DD HH:MM` yoki hozir uchun `/skip`)
+   - ⏰ **Tugash vaqti** (yoki admin yakunlaydi: `/skip`)
+   - 🧩 **Konkurs turi** — 🥊 **Battle** yoki 🎯 **Oddiy**
+3. Xulosa ekranida tasdiqlang → konkurs paneli ochiladi
 
-```
-/giveaway [sovrin] [daqiqa]
-```
+### Konkurs panellarida mavjud tugmalar
 
-- `/giveaway iPhone 15 30` — 30 daqiqa davom etadigan konkurs (sovrin: iPhone 15)
-- `/giveaway Telegram Premium` — muddatsiz konkurs (uni admin o'zi tugatadi)
+- ➕ **Ishtirokchi qo'shish** — username yoki ID yuboring; bot avtomatik kanalga tashlaydi:
+  ```
+  N-ishtirokchi
+  ism: @username
+  Omad tilaymiz
+  ```
+  (bu matnni **✏️ Ishtirokchi matni** tugmasi orqali o'zgartirish mumkin)
+- 📊 **Statistika** — joriy ball/ovozlar
+- 🔗 **Kanal ulash (oddiy)** — oldin ochilgan kanalni ulash (bot uni tozalab qayta ishlatadi)
+- 🏁 **Yakunlash** — g'olibni aniqlash
+- ❌ **Bekor qilish**
 
-2. Bot konkurs xabarini va **"🎁 Ishtirok etish"** tugmasini guruhga qo'yadi.
-3. A'zolar tugmani bosib qatnashadi (har bir a'zo 1 marta).
-4. Muddat tugagach yoki `/giveaway_end` orqali — **g'olib tasodifiy aniqlanadi**.
+### 🥊 Battle rejimi
 
-### Buyruqlar
+Bot ulangan akkountdan **"Vento Konkurs"** nomli kanal ochadi va har bir ishtirokchini kanalga alohida post qiladi. Ballar avtomatik hisoblanadi:
 
-- `/giveaway [sovrin] [daqiqa]` — konkurs ochish (faqat admin)
-- `/giveaway_end` — g'olibni aniqlab, konkursni tugatish (faqat admin)
-- `/giveaway_cancel` — konkursni bekor qilish (faqat admin)
+| Harakat | Ball |
+|---|---|
+| 1 ta reaksiya | 1 ball |
+| 1 ta komment | 2 ball |
+| 1 ta star (⭐) | 5 ball |
+
+Qoidalar:
+- Bir user bir necha komment yozsa ham **1 ta** hisoblanadi
+- **Kanal nomidan** (anonim) yozilgan kommentlar hisoblanmaydi
+- Ballar har 15 soniyada yangilanadi (📊 Statistika tugmasidan ko'ring)
+
+### 🎯 Oddiy rejim
+
+- Har bir ishtirokchi uchun alohida **ovoz/taklif havolasi** yaratiladi
+- Kanalga ishtirokchilar ro'yxati tugmalar bilan tashlanadi
+- Biror user tugmani bossa, botga olib boradi va **"✅ Ovoz berdingiz"** deb hisoblanadi
+- Qoidalar:
+  - Har kim **1 marta** ovoz bera oladi
+  - **O'ziga o'zi** ovoz bera olmaydi
+  - Ovozni **o'zgartirib bo'lmaydi**
+- Eng ko'p ovoz (taklif) yig'gan g'olib bo'ladi
 
 ### Eslatmalar
 
-- Faqat guruh admini yoki bot admini konkurs ocha oladi
-- Bir guruhda bir vaqtda **bitta** faol konkurs bo'lishi mumkin
-- Agar muddat berilmasa, konkursni admin o'zi tugatishi kerak bo'ladi
+- Konkurs yaratish uchun **akkauntingiz ulangan** bo'lishi kerak (kanal user akkountdan ochiladi)
+- Ma'lumotlar saqlanadi — bot qayta ishga tushsa ham davom etadi
+- G'olib "🏁 Yakunlash" bosilganda yoki belgilangan vaqt tugagach aniqlanadi
 
 ---
 
