@@ -493,6 +493,39 @@ Botdan cheksiz foydalanish uchun obuna sotib olish.
 - Admin ga murojaat qiling
 - Yangi obuna sotib oling
 
+## 🎁 GIVEAWAY / KONKURS — Guruhda Avtomatik Konkurs
+
+### Nima uchun kerak?
+
+Guruh a'zolari uchun konkurs (giveaway) o'tkazib, ishtirokchilarni yig'ish va g'olibni tasodifiy aniqlash imkonini beradi.
+
+### Qanday ishlaydi?
+
+1. Guruhda **guruh admini** quyidagi buyruqni yozadi:
+
+```
+/giveaway [sovrin] [daqiqa]
+```
+
+- `/giveaway iPhone 15 30` — 30 daqiqa davom etadigan konkurs (sovrin: iPhone 15)
+- `/giveaway Telegram Premium` — muddatsiz konkurs (uni admin o'zi tugatadi)
+
+2. Bot konkurs xabarini va **"🎁 Ishtirok etish"** tugmasini guruhga qo'yadi.
+3. A'zolar tugmani bosib qatnashadi (har bir a'zo 1 marta).
+4. Muddat tugagach yoki `/giveaway_end` orqali — **g'olib tasodifiy aniqlanadi**.
+
+### Buyruqlar
+
+- `/giveaway [sovrin] [daqiqa]` — konkurs ochish (faqat admin)
+- `/giveaway_end` — g'olibni aniqlab, konkursni tugatish (faqat admin)
+- `/giveaway_cancel` — konkursni bekor qilish (faqat admin)
+
+### Eslatmalar
+
+- Faqat guruh admini yoki bot admini konkurs ocha oladi
+- Bir guruhda bir vaqtda **bitta** faol konkurs bo'lishi mumkin
+- Agar muddat berilmasa, konkursni admin o'zi tugatishi kerak bo'ladi
+
 ---
 
 ## 🎉 XULOSA
