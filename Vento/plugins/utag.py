@@ -549,6 +549,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
         else:
 
             pause_flags[stop_key] = False
+            pause_flags.pop(stop_key, None)
 
             msg_text = "VentoTag davom ettirilmoqda (resume)..."
 
@@ -737,6 +738,10 @@ async def custom_utag_command_handler(client: Client, message: Message):
 
     stop_key = f"utag_{user_id}_{chat_id}"
 
+    # Avvalgi .pause dan qolgan flag bo'lsa — eski process o'lgan bo'lsa ham keyingi
+    # .atag ni abadiy kutishga (while pause) tiqib qo'yadi. Yangi startda tozalaymiz.
+    stop_flags.pop(stop_key, None)
+    pause_flags.pop(stop_key, None)
     stop_flags[stop_key] = False
 
     
@@ -978,6 +983,7 @@ async def run_utag_process(client: Client, process_key: str, user_client: Client
         )
     finally:
         stop_flags.pop(stop_key, None)
+        pause_flags.pop(stop_key, None)
         utag_process_tasks.pop(process_key, None)
         active_utag_processes.pop(process_key, None)
         _unregister_process(user_id, chat_id)
