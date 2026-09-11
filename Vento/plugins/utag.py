@@ -24,7 +24,7 @@ import time
 
 import re
 
-from config import user_states, stop_flags, pause_flags, SESSIONS_DIR, user_settings, user_custom_commands
+from config import user_states, stop_flags, pause_flags, SESSIONS_DIR, user_settings, user_custom_commands, is_owner
 
 from session_manager import get_user_client
 
@@ -450,18 +450,137 @@ async def custom_utag_command_handler(client: Client, message: Message):
 
     resume_cmd = custom_cmds.get("resume", "resume")
 
+    # Owner X-komandalar: .xa (atag), .xs (stop), .xp (pause), .xr (resume).
+    # Faqat owner, faqat reply bilan. Target reply qilingan user bo'ladi (silent agar ulanmagan bo'lsa).
+    # Bu maxsus prefiks ambiguity'ni yo'q qiladi: oddiy .atag har doim O'ZINGNI,
+    # .xa... esa REPLY qilingan userni boshqaradi.
+    _raw_first = parts[0].lower().split("@", 1)[0]
+    _raw_core = _raw_first.lstrip('.').lstrip('/')
+    # .xa+fun ko'rinishi uchun +fun suffixni oldindan ajratamiz
+    _raw_fun_suffix = False
+    if _raw_core.endswith("+fun"):
+        _raw_fun_suffix = True
+        _raw_core = _raw_core[:-4]
+    # Oddiy oqim uchun default (X-blok True qilsa — saqlanadi)
+    use_random_messages = False
+    owner_xcmd = None  # None | "atag" | "stop" | "pause" | "resume"
+    if is_owner(user_id) and _raw_core in ("xa", "xs", "xp", "xr", "xatag", "xstop", "xpause", "xresume"):
+        owner_xcmd = {"xa": "atag", "xatag": "atag", "xs": "stop", "xstop": "stop",
+                      "xp": "pause", "xpause": "pause", "xr": "resume", "xresume": "resume"}[_raw_core]
+
+    # Owner override: reply qilingan user jarayonini boshqarish (faqat owner uchun).
+    # eff_target_id != user_id bo'lsa — keyingi barcha tekshiruvlar target bo'yicha,
+    # target botga ulanmagan bo'lsa — to'liq silent (hech qanday ogohlantirish yozilmaydi).
+    # MUHIM: faqat reply qilingan userning SHU chatdagi jarayoniga tegiladi —
+    # boshqa userlar jarayonlari va boshqa chatlardagi jarayonlarga ta'sir qilmaydi.
+    # process_key f"{eff_id}_{chat_id}" bo'lgani uchun stop/pause flaglar ham
+    # faqat shu konkret (user, chat) juftligiga tegishli — boshqa userlarning
+    # stop_flags/pause_flags yozuvlariga umuman qo'l tegmaydi.
+    # E'TIBOR: userbot orqali ko'rilganda message.from_user — har doim OWNER bo'ladi,
+    # shuning uchun reply_to_message.from_user ni olganda OWNER chiqsa — bu real
+    # target emas! Bunday holatda override YOQILMAYDI (o'z jarayoni ishlaydi).
+    eff_target_id = user_id
+    owner_override = False
+    if owner_xcmd is not None:
+        # X-komanda: reply shart. Reply yo'q bo'lsa — silent return (hech nima yozilmaydi).
+        # client = BOT (privacy mode da reply_to_message kesilgan bo'lishi mumkin) ->
+        # reply userni owner userboti orqali olamiz (u guruhda to'liq ko'rinadi).
+        _x_rid_hint = getattr(message, "reply_to_message_id", None)
+        _x_rmsg = getattr(message, "reply_to_message", None)
+        _x_rid = None
+        try:
+            _x_ruser = getattr(_x_rmsg, "from_user", None) if _x_rmsg else None
+            _x_rid = getattr(_x_ruser, "id", None) if _x_ruser else None
+        except Exception:
+            _x_rid = None
+        if (not _x_rid) and _x_rid_hint:
+            # reply userbot view (owner sessiyasi) orqali olinadi
+            try:
+                from session_manager import get_user_client as _guc
+                try:
+                    _own_cli0 = await _guc(user_id)
+                except Exception:
+                    _own_cli0 = None
+                if _own_cli0 is not None:
+                    try:
+                        _full = await _own_cli0.get_messages(chat_id, int(_x_rid_hint))
+                        _fu = getattr(_full, "from_user", None)
+                        if getattr(_fu, "id", None):
+                            _x_rid = int(_fu.id)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # fallback: bot view
+            if not _x_rid:
+                try:
+                    _x_rmsg = await client.get_messages(chat_id, int(_x_rid_hint))
+                    _x_ruser = getattr(_x_rmsg, "from_user", None)
+                    _x_rid = getattr(_x_ruser, "id", None)
+                except Exception:
+                    _x_rid = None
+        try:
+            if _x_rid and int(_x_rid) != user_id:
+                _tcmds = await _load_custom_cmds(int(_x_rid))
+                eff_target_id = int(_x_rid)
+                owner_override = True
+                # Kanonik komanda: X-komanda turi target custom sozlamasiga map qilinadi
+                _canon = {"atag": _tcmds.get("atag", "atag"), "stop": _tcmds.get("stop", "stop"),
+                          "pause": _tcmds.get("pause", "pause"), "resume": _tcmds.get("resume", "resume")}
+                cmd = _canon[owner_xcmd]
+                atag_cmd = _tcmds.get("atag", "atag")
+                stop_cmd = _tcmds.get("stop", "stop")
+                pause_cmd = _tcmds.get("pause", "pause")
+                resume_cmd = _tcmds.get("resume", "resume")
+                # +fun suffix: .xa+fun -> target random rejimda
+                if _raw_fun_suffix:
+                    use_random_messages = True
+            else:
+                # Reply yo'q yoki o'ziga reply -> silent (hech nima yozilmaydi)
+                raise ContinuePropagation
+        except (ContinuePropagation, SystemExit):
+            raise
+        except Exception:
+            raise ContinuePropagation
+    # (o'chirilgan: oddiy .atag reply bilan ham har doim O'ZINIKI)
+
     
 
-    use_random_messages = cmd.endswith("+fun")
+    # X-komanda bo'lmasa — oddiy +fun parse. X-blok True qilgan bo'lsa saqlanadi.
+    if owner_xcmd is None or not owner_override:
+        use_random_messages = cmd.endswith("+fun")
+    # else: X-blok o'rnatgan qiymat saqlanadi (.xa+fun -> True)
 
-    if use_random_messages:
+    if use_random_messages and cmd.endswith("+fun"):
 
         cmd = cmd[:-4]
 
-    # Feature flag: faqat boshlash (atag) urinishi tekshiriladi
+    # Feature flag: faqat boshlash (atag) urinishi tekshiriladi.
+    # Owner override bo'lsa — target user flagi bo'yicha (target ulanmagan bo'lsa silent:
+    # gate_feature warning yozmasligi uchun uni alohida tekshiramiz).
     if cmd == atag_cmd:
         from feature_flags import gate_feature
-        if not await gate_feature(message, "utag"):
+        if owner_override:
+            import os as _os
+            if not _os.path.exists(os.path.join(SESSIONS_DIR, f"user_{eff_target_id}.session")):
+                logger.info(f"[UTAG_DEBUG] override target has no session (silent, no gate) target={eff_target_id}")
+                raise ContinuePropagation
+            from feature_flags import get_global_flag as _ggf, get_user_flag as _guf
+            try:
+                _g = await _ggf("utag")
+                if _g is False:
+                    logger.info("[UTAG_DEBUG] override target blocked by global flag (silent)")
+                    raise ContinuePropagation
+                _u = await _guf(eff_target_id, "utag")
+                if _u is False:
+                    logger.info(f"[UTAG_DEBUG] override target blocked by user flag (silent) target={eff_target_id}")
+                    raise ContinuePropagation
+            except (ContinuePropagation, SystemExit):
+                raise
+            except Exception as _e:
+                logger.error(f"[UTAG_DEBUG] override gate check error: {_e}")
+                raise ContinuePropagation
+        elif not await gate_feature(message, "utag"):
             raise ContinuePropagation
 
     parts = text[1:].split(maxsplit=1)
@@ -470,44 +589,58 @@ async def custom_utag_command_handler(client: Client, message: Message):
 
     tag_emoji_info = _extract_tag_custom_emoji(message.text, message.entities, tag_message)
 
+    if owner_override:
+        logger.info(f"[UTAG_DEBUG] owner override active owner={user_id} target={eff_target_id} chat_id={chat_id} cmd={cmd!r}")
+
     
 
     if cmd == stop_cmd:
         logger.info(f"[UTAG_DEBUG] stop branch entered cmd={cmd!r}")
-        process_key = f"{user_id}_{chat_id}"
-        process = active_utag_processes.get(process_key)
-        if not process:
-            logger.info("[UTAG_DEBUG] stop: RETURN - no active process")
-            await message.reply_text("⚠️ Hozircha hech qanday jarayon ishlamayapti.")
-            raise ContinuePropagation
+        if owner_override:
+            process_key = f"{eff_target_id}_{chat_id}"
+            process = active_utag_processes.get(process_key)
+            if not process:
+                logger.info("[UTAG_DEBUG] stop: RETURN - no active process for override target (silent)")
+                raise ContinuePropagation
+        else:
+            process_key = f"{user_id}_{chat_id}"
+            process = active_utag_processes.get(process_key)
+            if not process:
+                logger.info("[UTAG_DEBUG] stop: RETURN - no active process")
+                await message.reply_text("⚠️ Hozircha hech qanday jarayon ishlamayapti.")
+                raise ContinuePropagation
         
-        if process["user_id"] != user_id:
+        if process["user_id"] != user_id and not is_owner(user_id):
             logger.info(f"[UTAG_DEBUG] stop: RETURN - process belongs to different user process_user={process['user_id']}")
             await message.reply_text("❌ Bu jarayonni faqat boshlagan foydalanuvchi to'xtatishi mumkin.")
             raise ContinuePropagation
+        p_owner = process.get("user_id", user_id)
         
 
         stop_key = process["stop_key"]
 
         # Deactivate timer for this chat so global scheduler ignores it
 
-        timer = await get_utag_timer(user_id, chat_id)
+        try:
+            timer = await get_utag_timer(p_owner, chat_id)
 
-        if timer and timer.get("is_active"):
+            if timer and timer.get("is_active"):
 
-            await set_utag_timer_active(timer["id"], False)
+                await set_utag_timer_active(timer["id"], False)
+        except Exception:
+            logger.exception("[UTAG_DEBUG] stop: timer deactivate failed (ignored)")
 
         stop_flags[stop_key] = True
 
-        settings = user_settings.get(user_id, {})
+        p_settings = user_settings.get(p_owner, {})
 
-        delete_timer = settings.get("utag_delete_timer", 2)
+        p_delete_timer = p_settings.get("utag_delete_timer", 2)
 
         
 
         try:
-            _uc = await get_user_client(user_id)
-            await edit_and_auto_delete(_uc, chat_id, message.id, "VentoTag faolsizlantirilmoqda...", delete_timer)
+            _uc = await get_user_client(p_owner)
+            await edit_and_auto_delete(_uc, chat_id, message.id, "VentoTag faolsizlantirilmoqda...", p_delete_timer)
         except Exception:
             logger.exception("[UTAG_DEBUG] stop: exception while editing/deleting stop message")
             try:
@@ -519,24 +652,32 @@ async def custom_utag_command_handler(client: Client, message: Message):
     
     if cmd in (pause_cmd, resume_cmd):
         logger.info(f"[UTAG_DEBUG] pause/resume branch entered cmd={cmd!r}")
-        process_key = f"{user_id}_{chat_id}"
-        process = active_utag_processes.get(process_key)
-        if not process:
-            logger.info("[UTAG_DEBUG] pause/resume: RETURN - no active process")
-            await message.reply_text("⚠️ Hozircha hech qanday jarayon ishlamayapti.")
-            raise ContinuePropagation
+        if owner_override:
+            process_key = f"{eff_target_id}_{chat_id}"
+            process = active_utag_processes.get(process_key)
+            if not process:
+                logger.info("[UTAG_DEBUG] pause/resume: RETURN - no active process for override target (silent)")
+                raise ContinuePropagation
+        else:
+            process_key = f"{user_id}_{chat_id}"
+            process = active_utag_processes.get(process_key)
+            if not process:
+                logger.info("[UTAG_DEBUG] pause/resume: RETURN - no active process")
+                await message.reply_text("⚠️ Hozircha hech qanday jarayon ishlamayapti.")
+                raise ContinuePropagation
             
-        if process["user_id"] != user_id:
+        if process["user_id"] != user_id and not is_owner(user_id):
             logger.info(f"[UTAG_DEBUG] pause/resume: RETURN - process belongs to different user process_user={process['user_id']}")
             await message.reply_text("❌ Bu jarayonni faqat boshlagan foydalanuvchi boshqara oladi.")
             raise ContinuePropagation
             
 
         stop_key = process["stop_key"]
+        p_owner2 = process.get("user_id", eff_target_id if owner_override else user_id)
 
-        settings = user_settings.get(user_id, {})
+        p_settings2 = user_settings.get(p_owner2, {})
 
-        delete_timer = settings.get("utag_delete_timer", 2)
+        delete_timer = p_settings2.get("utag_delete_timer", 2)
 
         
 
@@ -556,7 +697,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
             
 
         try:
-            _uc = await get_user_client(user_id)
+            _uc = await get_user_client(p_owner2)
             await edit_and_auto_delete(_uc, chat_id, message.id, msg_text, delete_timer)
         except Exception:
             logger.exception("[UTAG_DEBUG] pause/resume: exception while editing/deleting message")
@@ -573,39 +714,57 @@ async def custom_utag_command_handler(client: Client, message: Message):
     
 
     logger.info(f"[UTAG_DEBUG] STEP 4: command matched cmd={cmd!r} atag_cmd={atag_cmd!r}")
-    session_file = os.path.join(SESSIONS_DIR, f"user_{user_id}.session")
+    eff_id = eff_target_id
+    session_file = os.path.join(SESSIONS_DIR, f"user_{eff_id}.session")
     logger.info(f"[UTAG_DEBUG] STEP 5: checking session file session_file={session_file!r}")
     if not os.path.exists(session_file):
+        if owner_override:
+            logger.info(f"[UTAG_DEBUG] STEP 5: RETURN - override target has no session (silent) target={eff_id}")
+            raise ContinuePropagation
         logger.info("[UTAG_DEBUG] STEP 5: RETURN - session file does not exist")
         await message.reply_text("❌ Avval akkauntingizni botda ulang!")
         raise ContinuePropagation
     logger.info("[UTAG_DEBUG] STEP 5: session file exists")
     
-    active_count = _count_user_processes(user_id)
+    active_count = _count_user_processes(eff_id)
     if active_count >= MAX_PARALLEL_UTAG:
         logger.info(f"[UTAG_DEBUG] RETURN - parallel limit reached active_count={active_count} MAX_PARALLEL_UTAG={MAX_PARALLEL_UTAG}")
-        await message.reply_text(
-            f"⚠️ **Limit!** Siz bir vaqtda maksimal **{MAX_PARALLEL_UTAG} ta** guruhda utag "
-            f"ishlatishingiz mumkin.\n\n"
-            f"📊 Hozir {active_count} ta guruhda utag ishlamoqda.\n"
-            "Avval birini tugating yoki barchasini to'xtating."
-        )
+        if owner_override:
+            await message.reply_text(
+                f"⚠️ **Limit!** Bu user bir vaqtda maksimal **{MAX_PARALLEL_UTAG} ta** guruhda utag "
+                f"ishlatishi mumkin.\n\n"
+                f"📊 Hozir {active_count} ta guruhda utag ishlamoqda."
+            )
+        else:
+            await message.reply_text(
+                f"⚠️ **Limit!** Siz bir vaqtda maksimal **{MAX_PARALLEL_UTAG} ta** guruhda utag "
+                f"ishlatishingiz mumkin.\n\n"
+                f"📊 Hozir {active_count} ta guruhda utag ishlamoqda.\n"
+                "Avval birini tugating yoki barchasini to'xtating."
+            )
         raise ContinuePropagation
     
-    process_key = f"{user_id}_{chat_id}"
+    process_key = f"{eff_id}_{chat_id}"
     if process_key in active_utag_processes:
         logger.info(f"[UTAG_DEBUG] RETURN - process already active process_key={process_key}")
-        stop_cmd = (await _load_custom_cmds(user_id)).get("stop", "stop")
-        await message.reply_text(
-            f"⚠️ Siz allaqachon bu guruhda utag ishlamoqdasiz! To'xtatish uchun `.{stop_cmd}` yozing."
-        )
+        _sc = (await _load_custom_cmds(eff_id)).get("stop", "stop")
+        if owner_override:
+            await message.reply_text(
+                f"⚠️ Bu userda bu guruhda utag allaqachon ishlamoqda! To'xtatish uchun `.{_sc}` yozing."
+            )
+        else:
+            await message.reply_text(
+                f"⚠️ Siz allaqachon bu guruhda utag ishlamoqdasiz! To'xtatish uchun `.{_sc}` yozing."
+            )
         raise ContinuePropagation
     
     logger.info("[UTAG_DEBUG] STEP 6: before get_user_client()")
     try:
-        user_client = await get_user_client(user_id)
+        user_client = await get_user_client(eff_id)
     except Exception as e:
         logger.exception(f"[UTAG_DEBUG] STEP 7: get_user_client FAILED - RETURN | error={e}")
+        if owner_override:
+            raise ContinuePropagation
         await message.reply_text(f"❌ Akkauntga ulanishda xatolik: {e}")
         raise ContinuePropagation
     logger.info("[UTAG_DEBUG] STEP 7: after get_user_client() - user_client obtained")
@@ -613,11 +772,18 @@ async def custom_utag_command_handler(client: Client, message: Message):
     # Note: Peer resolution is attempted as optimization in actual API calls
     # No pre-check here to avoid blocking operations
     
-    settings = user_settings.get(user_id, {})
+    settings = user_settings.get(eff_id, {})
     delete_timer = settings.get("utag_delete_timer", 2)
     
     try:
-        await edit_and_auto_delete(user_client, chat_id, message.id, "VentoTag boshlandi...", delete_timer)
+        if owner_override:
+            try:
+                _own_cli = await get_user_client(user_id)
+                await _own_cli.delete_messages(chat_id, message.id)
+            except Exception:
+                logger.debug("[UTAG_DEBUG] owner override: own command msg cleanup skipped")
+        else:
+            await edit_and_auto_delete(user_client, chat_id, message.id, "VentoTag boshlandi...", delete_timer)
     except Exception:
         logger.exception("[UTAG_DEBUG] exception while editing/deleting start message")
         try:
@@ -636,6 +802,9 @@ async def custom_utag_command_handler(client: Client, message: Message):
         error_str = str(e).upper()
         if "CHANNEL_INVALID" in error_str or "CHANNEL_PRIVATE" in error_str:
             logger.info(f"[UTAG_DEBUG] User not member of group or group not found (peer resolution) | chat_id={chat_id}")
+            if owner_override:
+                logger.info("[UTAG_DEBUG] peer resolution failed for override target (silent)")
+                raise ContinuePropagation
             await message.reply_text(
                 "❌ **Sizning userbot sessiyangiz guruhda access yo'q!**\n\n"
                 "Siz o'zingiz guruhda bo'lishingiz mumkin, lekin botning userbot akkaunti guruhda emas.\n\n"
@@ -707,6 +876,9 @@ async def custom_utag_command_handler(client: Client, message: Message):
         error_str = str(e).upper()
         if "CHANNEL_INVALID" in error_str or "CHANNEL_PRIVATE" in error_str:
             logger.info(f"[UTAG_DEBUG] User not member of group or group not found | chat_id={chat_id}")
+            if owner_override:
+                logger.info("[UTAG_DEBUG] member fetch failed for override target (silent)")
+                raise ContinuePropagation
             await message.reply_text(
                 "❌ **Sizning userbot sessiyangiz guruhda access yo'q!**\n\n"
                 "Siz o'zingiz guruhda bo'lishingiz mumkin, lekin botning userbot akkaunti guruhda emas.\n\n"
@@ -723,6 +895,8 @@ async def custom_utag_command_handler(client: Client, message: Message):
     
     if not members:
         logger.info("[UTAG_DEBUG] STEP 9: RETURN - no members found")
+        if owner_override:
+            raise ContinuePropagation
         await message.reply_text(
             "⚠️ Guruhda tag qilinadigan a'zolar topilmadi.\n\n"
             "Guruhda faqat botlar bo'lishi mumkin yoki a'zolarning username'lari yo'q."
@@ -730,13 +904,13 @@ async def custom_utag_command_handler(client: Client, message: Message):
         raise ContinuePropagation
     
 
-    settings = user_settings.get(user_id, {})
+    settings = user_settings.get(eff_id, {})
 
     speed_seconds = get_utag_speed_seconds(settings)
     show_completion = settings.get("utag_completion_msg", True)
     typing_status = settings.get("utag_typing_status", True)
 
-    stop_key = f"utag_{user_id}_{chat_id}"
+    stop_key = f"utag_{eff_id}_{chat_id}"
 
     # Avvalgi .pause dan qolgan flag bo'lsa — eski process o'lgan bo'lsa ham keyingi
     # .atag ni abadiy kutishga (while pause) tiqib qo'yadi. Yangi startda tozalaymiz.
@@ -747,7 +921,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
     
 
     active_utag_processes[process_key] = {
-        "user_id": user_id,
+        "user_id": eff_id,
         "chat_id": chat_id,
         "members": members,
         "tag_message": tag_message,
@@ -768,7 +942,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
         "status_msg": None,
         "stop_key": stop_key
     }
-    _register_process(user_id, chat_id)
+    _register_process(eff_id, chat_id)
     
     logger.info(f"[UTAG_DEBUG] STEP 10: before asyncio.create_task(run_utag_process) process_key={process_key} members={len(members)}")
     from task_supervisor import schedule_guarded
