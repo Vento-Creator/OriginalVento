@@ -1,0 +1,9 @@
+{
+  "images_tested": 20,
+  "successful": 20,
+  "failed": 0,
+  "average_ms": 2.558577060699463,
+  "median_ms": 2.519845962524414,
+  "p95_ms": 6.642341613769531,
+  "peak_rss_mb": 0.3359375
+}

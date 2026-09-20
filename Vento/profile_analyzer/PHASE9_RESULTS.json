@@ -1,0 +1,54 @@
+{
+  "memory_benchmark": {
+    "baseline_mb": 95.515625,
+    "after_imports_mb": 95.515625,
+    "after_init_mb": 95.6875,
+    "peak_processing_mb": 95.6875,
+    "total_delta_mb": 0.171875
+  },
+  "name_analyzer": {
+    "passed": 19,
+    "failed": 2,
+    "total": 21
+  },
+  "username_analyzer": {
+    "passed": 17,
+    "failed": 0,
+    "total": 17
+  },
+  "bio_analyzer": {
+    "passed": 17,
+    "failed": 0,
+    "total": 17
+  },
+  "score_distribution": {
+    "score_counts": {
+      "0": 3,
+      "1": 2,
+      "2": 3,
+      "3": 2,
+      "4": 0
+    },
+    "analyzer_counts": {
+      "name_positive": 6,
+      "username_positive": 5,
+      "bio_positive": 3,
+      "photo_positive": 0
+    },
+    "total_profiles": 10
+  },
+  "cache_validation": {
+    "first_run_ms": 2.525806427001953,
+    "second_run_ms": 0.9977817535400391,
+    "speedup": 2.53142174432497,
+    "same_result": true,
+    "different_profile_different_score": true
+  },
+  "railway_safety": {
+    "current_memory_mb": 95.828125,
+    "memory_margin_mb": 928.171875,
+    "phase8_avg_latency_ms": 2.56,
+    "phase8_peak_memory_mb": 0.34,
+    "railway_compatible": true
+  }
+}

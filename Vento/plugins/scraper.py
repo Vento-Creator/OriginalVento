@@ -9,6 +9,34 @@ import asyncio
 import time
 import re
 from session_manager import get_user_client
+import gender_guesser.detector as gender
+
+# Gender detector initialization
+d = gender.Detector(case_sensitive=False)
+
+# Profile analyzer integration
+try:
+    from profile_analyzer import ProfileAnalyzer, ProfileAnalyzerConfig
+    PROFILE_ANALYZER_AVAILABLE = True
+    # Initialize global profile analyzer instance
+    _profile_analyzer = None
+    _profile_analyzer_lock = asyncio.Lock()
+except ImportError:
+    PROFILE_ANALYZER_AVAILABLE = False
+    _profile_analyzer = None
+
+
+async def get_profile_analyzer():
+    """Get or create global profile analyzer instance"""
+    global _profile_analyzer
+    if not PROFILE_ANALYZER_AVAILABLE:
+        return None
+    
+    async with _profile_analyzer_lock:
+        if _profile_analyzer is None:
+            config = ProfileAnalyzerConfig.from_env()
+            _profile_analyzer = ProfileAnalyzer(config)
+        return _profile_analyzer
 
 GIRL_NAMES = {
     "nilufar", "gulnora", "malika", "nodira", "zulfiya", "barno", "dilnoza",
@@ -58,24 +86,49 @@ def is_likely_girl(first_name: str) -> bool:
         
     first_word = words[0]
     
+    # 1. O'zbek qiz ismlari ro'yxatini tekshirish
     if first_word in GIRL_NAMES:
         return True
         
+    # 2. O'zbek ayol suffixlari
     female_suffixes = ("xon", "bonu", "niso", "bibi", "begim", "oy", "goy")
     if first_word.endswith(female_suffixes):
         return True
         
-    female_prefixes = ("gul", "moh", "oy", "nur")
-    
-    male_suffixes = ("bek", "jon", "boy", "mirzo", "ali", "xoja", "xuja", "iddin", "ulla")
+    # 3. AI/ML model bilan ism bo'yicha jinsni aniqlash
+    try:
+        detected_gender = d.get_gender(first_word)
+        # 'female' yoki 'mostly_female' bo'lsa qiz deb hisoblaymiz
+        if detected_gender in ('female', 'mostly_female'):
+            return True
+        # 'male' yoki 'mostly_male' bo'lsa erkak deb hisoblaymiz
+        if detected_gender in ('male', 'mostly_male'):
+            return False
+    except:
+        pass
+        
+    # 4. O'zbek ayol prefikslari
+    if first_word.startswith(("gul", "moh", "oy")):
+        return True
+        
+    # 5. Rus ayol suffixlari
+    if first_word.endswith(("ova", "eva", "ina", "aya", "skaya")):
+        return True
+        
+    # 6. Erkak suffixlari (aniq ravishda erkak bo'lsa)
+    male_suffixes = ("bek", "jon", "boy", "mirzo", "ali", "xoja", "xuja", "iddin", "ulla", "ovich", "evich")
     if first_word.endswith(male_suffixes):
         return False
         
-    if first_word.startswith(("gul", "moh")):
-        return True
-        
-    if first_word.endswith(("ova", "eva", "ina", "aya")):
-        return True
+    # 7. Agar model 'andy' (ambiguous) qaytarsa, qo'shimcha tekshirish
+    try:
+        detected_gender = d.get_gender(first_word)
+        if detected_gender == 'andy':
+            # Qo'shimcha o'zbek qoidalarini tekshiramiz
+            if first_word.startswith(("gul", "moh", "oy", "nur")):
+                return True
+    except:
+        pass
         
     return False
 
@@ -138,8 +191,16 @@ async def check_scrape_target(user_client: Client, chat, user_id: int):
     return None
 
 
-async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, client: Client):
-    """Fast scrape logic - queue callback or direct execution"""
+async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, client: Client, use_profile_scoring: bool = False):
+    """Fast scrape logic - queue callback or direct execution
+    
+    Args:
+        user_id: User ID performing the scrape
+        target: Chat ID to scrape
+        status_msg: Status message for updates
+        client: Pyrogram client
+        use_profile_scoring: Whether to filter users by profile score
+    """
     stop_key = f"scraper_{user_id}_{int(time.time())}"
     stop_flags[stop_key] = False
     
@@ -157,7 +218,14 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
             await add_scraped_group(group_id, group_title, int(time.time()), owner_id=user_id)
 
         count = 0
+        filtered_count = 0  # Count of users filtered by profile scoring
         batch = []
+        
+        # Get profile analyzer if scoring is enabled
+        profile_analyzer = None
+        if use_profile_scoring and PROFILE_ANALYZER_AVAILABLE:
+            profile_analyzer = await get_profile_analyzer()
+        
         async for member in user_client.get_chat_members(target):
             if stop_flags.get(stop_key):
                 break
@@ -165,6 +233,17 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
                 continue
             if not member.user.username:
                 continue
+
+            # Apply profile scoring filter if enabled
+            if use_profile_scoring and profile_analyzer:
+                try:
+                    analysis = await profile_analyzer.analyze(member.user, user_client)
+                    if not profile_analyzer.should_include_user(analysis):
+                        filtered_count += 1
+                        continue
+                except Exception as e:
+                    # If analysis fails, include the user anyway (graceful degradation)
+                    logger.warning(f"Profile analysis failed for user {member.user.id}: {e}")
 
             batch.append((
                 member.user.id,
@@ -180,11 +259,15 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
 
             if count % 50 == 0:
                 bar, pct = make_progress_bar(count, chat.members_count or count + 100)
+                status_text = f"⚡ **Odatiy scrape...**\n\n"
+                status_text += f"👥 Yig'ildi: **{count}** ta\n"
+                if use_profile_scoring and filtered_count > 0:
+                    status_text += f"� Filtrlangan: **{filtered_count}** ta\n"
+                status_text += f"[{bar}] {pct}%"
+                
                 try:
                     await status_msg.edit_text(
-                        f"⚡ **Odatiy scrape...**\n\n"
-                        f"👥 Yig'ildi: **{count}** ta\n"
-                        f"[{bar}] {pct}%",
+                        status_text,
                         reply_markup=InlineKeyboardMarkup([
                             [InlineKeyboardButton("🛑 To'xtatish", callback_data=f"stop_scraper_{stop_key}")]
                         ])
@@ -203,13 +286,20 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
         except Exception as e:
             logger.error(f"Scraper activity tracking xatosi: {e}")
         
-        await log_user_action(user_id, f"Scraper (Tezkor) ishlatdi: {count} ta a'zo yig'ildi")
+        action_text = f"Scraper (Tezkor) ishlatdi: {count} ta a'zo yig'ildi"
+        if use_profile_scoring:
+            action_text += f", {filtered_count} ta filtrlandi"
+        await log_user_action(user_id, action_text)
+
+        result_text = f"✅ **Muvaffaqiyatli yig'ildi!**\n\n"
+        result_text += f"🏷 Guruh: **{chat.title}**\n"
+        result_text += f"👥 Yig'ilgan: **{count}** ta\n"
+        if use_profile_scoring and filtered_count > 0:
+            result_text += f"🔍 Filtrlangan: **{filtered_count}** ta\n"
+        result_text += f"🗂 Baza ID: `{group_id}`"
 
         await status_msg.edit_text(
-            f"✅ **Muvaffaqiyatli yig'ildi!**\n\n"
-            f"🏷 Guruh: **{chat.title}**\n"
-            f"👥 Yig'ilgan: **{count}** ta\n"
-            f"🗂 Baza ID: `{group_id}`",
+            result_text,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📂 Bazani ochish", callback_data="admin_baza")],
                 [InlineKeyboardButton("🔙 Asosiy menyu", callback_data="menu_main")]
@@ -449,18 +539,32 @@ async def scrape_fast_callback(client: Client, callback_query: CallbackQuery):
     
     target = target_data["target"]
     
+    # Check if profile scoring is enabled
+    use_profile_scoring = False
+    if PROFILE_ANALYZER_AVAILABLE:
+        try:
+            profile_analyzer = await get_profile_analyzer()
+            if profile_analyzer and profile_analyzer.config.enabled:
+                use_profile_scoring = True
+        except Exception as e:
+            logger.warning(f"Failed to check profile analyzer: {e}")
+    
     async def scraper_callback(data):
         """Queue processor tomonidan chaqiriladigan callback"""
         from config import bot_client
+        status_text = "⚡ **Odatiy scrape boshlandi...**\n\n"
+        if use_profile_scoring:
+            status_text += "🧠 Profile scoring yoqilgan\n"
+        status_text += "🔄 A'zolar yig'ilmoqda...\n[░░░░░░░░░░] 0%"
+        
         msg = await bot_client.send_message(
             user_id,
-            "⚡ **Odatiy scrape boshlandi...**\n\n"
-            "🔄 A'zolar yig'ilmoqda...\n[░░░░░░░░░░] 0%",
+            status_text,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🛑 To'xtatish", callback_data="menu_main")]
             ])
         )
-        await execute_fast_scrape(user_id, data["target"], msg, client)
+        await execute_fast_scrape(user_id, data["target"], msg, client, use_profile_scoring)
     
     operation_size = "medium"  # Oddiy scraper - medium size
     
@@ -491,9 +595,13 @@ async def scrape_fast_callback(client: Client, callback_query: CallbackQuery):
     stop_key = f"scraper_{user_id}_{int(time.time())}"
     stop_flags[stop_key] = False
 
+    status_text = "⚡ **Odatiy scrape boshlandi...**\n\n"
+    if use_profile_scoring:
+        status_text += "🧠 Profile scoring yoqilgan\n"
+    status_text += "🔄 A'zolar yig'ilmoqda...\n[░░░░░░░░░░] 0%"
+
     msg = await callback_query.message.edit_text(
-        "⚡ **Odatiy scrape boshlandi...**\n\n"
-        "� A'zolar yig'ilmoqda...\n[░░░░░░░░░░] 0%",
+        status_text,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🛑 To'xtatish", callback_data=f"stop_scraper_{stop_key}")]
         ])
@@ -501,7 +609,7 @@ async def scrape_fast_callback(client: Client, callback_query: CallbackQuery):
 
     active_scraper_processes[stop_key] = {"user_id": user_id, "target": target, "status_msg": msg}
 
-    success = await execute_fast_scrape(user_id, target, msg, client)
+    success = await execute_fast_scrape(user_id, target, msg, client, use_profile_scoring)
     
     stop_flags.pop(stop_key, None)
     active_scraper_processes.pop(stop_key, None)

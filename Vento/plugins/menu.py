@@ -54,7 +54,17 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
             [KeyboardButton("💬 Chatlar"),   KeyboardButton("🔍 Guruh qidirish")],
         ]
         if adm:
-            rows.append([KeyboardButton("🌐 Til"), KeyboardButton("⚙️ Funksiyalar")])
+            # Check if profile analyzer is available
+            try:
+                from profile_scoring_settings import PROFILE_SCORING_BTN
+                profile_scoring_available = True
+            except ImportError:
+                profile_scoring_available = False
+            
+            if profile_scoring_available:
+                rows.append([KeyboardButton("🌐 Til"), KeyboardButton("⚙️ Funksiyalar"), KeyboardButton(PROFILE_SCORING_BTN)])
+            else:
+                rows.append([KeyboardButton("🌐 Til"), KeyboardButton("⚙️ Funksiyalar")])
         else:
             rows.append([KeyboardButton("🌐 Til")])
         if is_free and not has_paid_sub and not adm:

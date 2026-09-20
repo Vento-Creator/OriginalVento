@@ -782,14 +782,20 @@ class AuthManager:
             True if 2FA is needed, False if login complete
         """
         try:
-            await asyncio.wait_for(client.sign_in(phone, phone_code_hash, code), timeout=10.0)
+            await asyncio.wait_for(client.sign_in(phone, phone_code_hash, code), timeout=30.0)
             return False  # Login complete
         except SessionPasswordNeeded:
             return True  # 2FA needed
         except (PhoneCodeInvalid, PhoneCodeExpired) as e:
+            logger.warning(f"Code verification failed for user: invalid/expired code")
             raise AuthenticationError("Kod noto'g'ri yoki muddati o'tgan")
+        except FloodWait as e:
+            wait_time = getattr(e, 'value', 0)
+            logger.info(f"FloodWait during code verification: waiting {wait_time}s")
+            raise ValidationError(f"FloodWait: {wait_time}s kutib turing")
         except Exception as e:
-            raise LoginError(f"Kod tekshirishda xatolik: {e}")
+            logger.error(f"Unexpected error in verify_code for user: {e}", exc_info=True)
+            raise LoginError(f"Kod tekshirishda kutish vaqtining o'tishi: {e}")
     
     async def verify_password(self, client: Client, password: str) -> bool:
         """
@@ -1059,23 +1065,21 @@ class LoginService:
                     return False, "Login tugatishda xatolik", False
                     
         except AuthenticationError as e:
-            # Log authentication error
-            try:
-                from error_handler import global_error_handler
-                await global_error_handler.handle_error(e, "login_system", user_id)
-            except Exception:
-                pass
+            logger.warning(f"Authentication failed for user {user_id}: {e}")
             return False, str(e), False
         except LoginError as e:
+            logger.warning(f"Login error for user {user_id}: {e}")
             await self.state_manager.update_state(user_id, LoginState.FAILED)
             self.session_manager.cleanup_pending(user_id)
-            # Log login error
-            try:
-                from error_handler import global_error_handler
-                await global_error_handler.handle_error(e, "login_system", user_id)
-            except Exception:
-                pass
             return False, str(e), False
+        except ValidationError as e:
+            logger.warning(f"Validation error for user {user_id}: {e}")
+            return False, str(e), False
+        except Exception as e:
+            logger.error(f"Unexpected error in submit_code for user {user_id}: {e}", exc_info=True)
+            await self.state_manager.update_state(user_id, LoginState.FAILED)
+            self.session_manager.cleanup_pending(user_id)
+            return False, f"Kod tekshirishda kutish vaqtining o'tishi: {e}", False
     
     async def submit_password(self, user_id: int, password: str) -> Tuple[bool, str, bool]:
         """

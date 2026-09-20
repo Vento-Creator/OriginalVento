@@ -4,3 +4,6 @@ asyncpg
 psutil
 phonenumbers
 python-dotenv
+gender-guesser
+Pillow
+pytest
