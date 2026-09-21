@@ -480,11 +480,15 @@ class AuthManager:
                 "lang_pack": "",
             }
         # Realistic Android phone (default)
+        # lang_pack="" — halol imzo: rasmiy ilova deb yolg'on arg'u qilish
+        # (lang_pack="android" + rasmiy bo'lmagan api_id) Telegramning
+        # sendCode ni qabul qilib, kodni JIMLIKDA yubormasligiga sabab
+        # bo'ladi. Test botda aynan lang_pack="" bilan kod yetib borgan.
         return {
             "device_model": "Samsung SM-A136B",
             "app_version": "11.8.4",
             "system_version": "Android 14",
-            "lang_pack": "android",
+            "lang_pack": "",
         }
 
     # Telegram errors where retrying with another api_id/api_hash pair cannot
@@ -501,27 +505,25 @@ class AuthManager:
     )
 
     async def _invoke_send_code(self, client, phone: str, force_sms: bool):
-        """Issue auth.SendCode — IN-APP DELIVERY IS MANDATORY.
+        """Issue auth.SendCode — Telegramga yetkazish usulini tanlash huquqi beriladi.
 
-        SMS was removed per product decision: instead of SMS, the code is
-        ALWAYS requested into the Telegram app. Raw auth.SendCode is sent
-        with allow_app_hash=True (official-client signature) so Telegram
-        pushes the code into the user's Telegram app (777000 service chat /
-        app popup). All alternative channels (flashcall, missed call,
-        Firebase, SMS fallback) are explicitly disallowed in CodeSettings.
-        The ``force_sms`` parameter is kept for call-site compatibility but
-        is IGNORED — requesting SMS is not possible anymore.
+        Avval allow_app_hash=True bilan SMS butunlay o'chirilgan edi — kod faqat
+        ilovaga borishi kerak edi. Rasmiy bo'lmagan api_id + yolg'on rasmiy-imzo
+        bilan bu yo'l Telegramda jimlikda ishlamay qolardi (sendCode OK, kod kelmadi).
+        Hozir test botda ishlagan holat aynan moslashtirildi: standart CodeSettings
+        (Pyrogramning client.send_code() ichidagidek) — Telegram o'zi eng mos
+        yetkazish usulini (app-popup / SMS) tanlaydi.
         """
         from pyrogram.raw.functions.auth import SendCode
         from pyrogram.raw.types import CodeSettings
 
         if force_sms:
             logger.info(
-                "force_sms requested but SMS delivery is DISABLED — "
-                "requesting in-app delivery instead (mandatory app-first)"
+                "force_sms requested — standart CodeSettings ishlatilyapti, "
+                "yetkazish usulini Telegram tanlaydi"
             )
         logger.info(
-            "send_code used raw auth.SendCode with allow_app_hash=True (mandatory in-app delivery)"
+            "send_code used standart CodeSettings (test-bot bilan bir xil imzo)"
         )
 
         return await asyncio.wait_for(
@@ -530,14 +532,7 @@ class AuthManager:
                     phone_number=phone,
                     api_id=client.api_id,
                     api_hash=client.api_hash,
-                    settings=CodeSettings(
-                        allow_flashcall=False,
-                        current_number=False,
-                        allow_app_hash=True,
-                        allow_missed_call=False,
-                        allow_firebase=False,
-                        unknown_number=False,
-                    ),
+                    settings=CodeSettings(),
                 )
             ),
             timeout=10.0,
