@@ -27,7 +27,7 @@ except ImportError:
 
 
 async def get_profile_analyzer():
-    """Get or create global profile analyzer instance"""
+    """Global profile analyzer obyektini olish yoki yaratish."""
     global _profile_analyzer
     if not PROFILE_ANALYZER_AVAILABLE:
         return None
@@ -76,7 +76,7 @@ def parse_group_identifier(text: str) -> str:
     return text
 
 def is_likely_girl(first_name: str) -> bool:
-    """Check if a name is likely female using multiple heuristics."""
+    """Ismni qiz ekanligini aniqlash uchun bir qancha metodlardan foydalanadi."""
     if not first_name:
         return False
     
@@ -151,23 +151,23 @@ SCRAPER_TYPE_ERROR_TEXT = (
 
 
 def friendly_scrape_error(e: Exception) -> str:
-    """Convert technical Telegram errors to user-friendly messages."""
+    """Telegram xatolarini tushunarli xabarlarga aylantirish"""
     s = str(e).upper()
     if "CHAT_ADMIN_REQUIRED" in s or "ADMIN_REQUIRED" in s:
         return (
-            "This chat has a private member list (channel). "
-            "You need to be an admin to scrape from channels, or send "
-            "an invite link to a group with visible members."
+            "Kanalda a'zolar ro'yxati yashiringan (maxfiy). "
+            "Kanaldan odam yig'ish uchun admin bo'lishingiz yoki "
+            "a'zolar ko'rinadigan guruh havolasini yuboring."
         )
     if "CHANNEL_PRIVATE" in s or "CHAT_FORBIDDEN" in s:
-        return "Group/channel not found or access denied."
+        return "Guruh/kanal topilmadi yoki kirish mumkin emas."
     if "USER_NOT_PARTICIPANT" in s:
-        return "You need to join this group/channel first."
+        return "Avval ushbu guruh/kanala a'zo bo'lishingiz kerak."
     if "FLOOD" in s:
-        return "Telegram rate limit (FloodWait). Please wait and try again."
+        return "Tez-tez so'rov yubordingiz. Iltimos, biroz kutib, qayta urinib ko'ring."
     if "AUTH_KEY" in s or "SESSION" in s or "UNAUTHORIZED" in s:
         return f"{e}"
-    return f"Error: {e}"
+    return f"Xato: {e}"
 
 
 async def check_scrape_target(user_client: Client, chat, user_id: int):
@@ -186,21 +186,21 @@ async def check_scrape_target(user_client: Client, chat, user_id: int):
             return SCRAPER_TYPE_ERROR_TEXT
     elif chat.type in (ChatType.PRIVATE, ChatType.BOT):
         return (
-            "❌ Scraper only works for **groups** or **channels**.\n"
-            "Send a group invite link: `@group_username`"
+            "❌ Scraper faqat **guruhlar** yoki **kanallar**da ishlaydi.\n"
+            "Guruh havolasini yuboring: `@guruh_username`"
         )
     return None
 
 
 async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, client: Client, use_profile_scoring: bool = False):
-    """Fast scrape logic - queue callback or direct execution
+    """Tezkor scrape — a'zolar ro'yxati orqali yig'ish.
     
     Args:
-        user_id: User ID performing the scrape
-        target: Chat ID to scrape
-        status_msg: Status message for updates
+        user_id: Scrape qilayotgan foydalanuvchi ID
+        target: Scrape qilinadigan chat ID
+        status_msg: Yangilanuvchi status xabari
         client: Pyrogram client
-        use_profile_scoring: Whether to filter users by profile score
+        use_profile_scoring: Profile score bo'yicha filtrlash
     """
     stop_key = f"scraper_{user_id}_{int(time.time())}"
     stop_flags[stop_key] = False
@@ -260,17 +260,17 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
 
             if count % 50 == 0:
                 bar, pct = make_progress_bar(count, chat.members_count or count + 100)
-                status_text = f"⚡ **Fast scrape...**\n\n"
-                status_text += f"👥 Collected: **{count}**\n"
+                status_text = f"⚡ **Tezkor scrape...**\n\n"
+                status_text += f"👥 Yig'ildi: **{count}**\n"
                 if use_profile_scoring and filtered_count > 0:
-                    status_text += f"🔍 Filtered: **{filtered_count}**\n"
+                    status_text += f"🔍 Filtrlangan: **{filtered_count}**\n"
                 status_text += f"[{bar}] {pct}%"
                 
                 try:
                     await status_msg.edit_text(
                         status_text,
                         reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🛑 Stop", callback_data=f"stop_scraper_{stop_key}")]
+                            [InlineKeyboardButton("🛑 To'xtatish", callback_data=f"stop_scraper_{stop_key}")]
                         ])
                     )
                 except:
@@ -287,17 +287,17 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
         except Exception as e:
             logger.error(f"Scraper activity tracking error: {e}")
         
-        action_text = f"Scraper (fast) executed: {count} members collected"
+        action_text = f"Scraper (tez) bajarildi: {count} ta a'zo yig'ildi"
         if use_profile_scoring:
-            action_text += f", {filtered_count} filtered"
+            action_text += f", {filtered_count} ta filtrlangan"
         await log_user_action(user_id, action_text)
 
-        result_text = f"✅ **Successfully collected!**\n\n"
-        result_text += f"🏷 Group: **{chat.title}**\n"
-        result_text += f"👥 Collected: **{count}**\n"
+        result_text = f"✅ **Muvaffaqiyatli yig'di!**\n\n"
+        result_text += f"🏷  Guruh: **{chat.title}**\n"
+        result_text += f"👥  Yig'ildi: **{count}**\n"
         if use_profile_scoring and filtered_count > 0:
-            result_text += f"🔍 Filtered: **{filtered_count}**\n"
-        result_text += f"🗂 Database ID: `{group_id}`"
+            result_text += f"🔍  Filtrlangan: **{filtered_count}**\n"
+        result_text += f"🗂  Baza ID: `{group_id}`"
 
         await status_msg.edit_text(
             result_text,
@@ -314,7 +314,7 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
         return False
 
 async def execute_msg_scrape(user_id: int, target: int, msg_limit: int, status_msg: Message, client: Client):
-    """Message-based scrape logic - queue callback or direct execution"""
+    """Habarlar orqali scrape — chat tarixidan faol foydalanvchilarni yig'ish."""
     stop_key = f"scraper_{user_id}_{int(time.time())}"
     stop_flags[stop_key] = False
     
@@ -553,10 +553,10 @@ async def scrape_fast_callback(client: Client, callback_query: CallbackQuery):
     async def scraper_callback(data):
         """Queue processor tomonidan chaqiriladigan callback"""
         from config import bot_client
-        status_text = "⚡ **Fast scrape starting...**\n\n"
+        status_text = "⚡ **Tezkor scrape boshlandi...**\n\n"
         if use_profile_scoring:
-            status_text += "🧠 Profile scoring enabled\n"
-        status_text += "🔄 Collecting members...\n[░░░░░░░░░░] 0%"
+            status_text += "🧠 Profile scoring yoqildi\n"
+        status_text += "🔄 A'zolari yig'ilmoqda...\n[░░░░░░░░░░] 0%"
         
         msg = await bot_client.send_message(
             user_id,
@@ -1017,11 +1017,40 @@ async def add_to_baza_handler(client: Client, message: Message):
             user = await user_client.get_users(target)
             await add_scraped_member(user.id, user.username, user.first_name, baza_id)
             await log_user_action(user_id, f"Yangi user qo'shdi: {user.id} -> Baza: {baza_id}")
-            await msg.edit_text(f"✅ **{user.first_name}** (`{user.id}`) baza `{baza_id}` ga qo'shildi.")
+            await msg.edit_text(f"✅ **Muvaffaqiyatli qo'shildi!**\\n\\n👤 `{user.first_name}`\\n🗂 Baza ID: `{baza_id}`")
         except Exception as e:
-            await msg.edit_text(f"❌ Xatolik: {e}")
+            await msg.edit_text("❌ Foydalanuvchi topilmadi yoki kelib tushirmadi.")
     except Exception as e:
-        await msg.edit_text(f"❌ Sessiya xatosi: {e}")
+        await msg.edit_text("❌ Sessiya xatosi. Iltimos, akkauntingizni qayta ulang.")
+
+
+# Kontakt orqali bazaga foydalanuvchi qo'shish
+@Client.on_message(filters.private & filters.contact, group=-10)
+async def add_contact_to_baza_handler(client: Client, message: Message):
+    """Foydalanuvchi kontakt yuborsa, avvalgi bazaga qo'shish imkonini beradi."""
+    from feature_flags import gate_feature
+    if not await gate_feature(message, "scraper"):
+        return
+    
+    contact = message.contact
+    if not contact or not contact.user_id:
+        return
+    
+    user_id = message.from_user.id
+    session_name = os.path.join(SESSIONS_DIR, f"user_{user_id}")
+    if not os.path.exists(session_name + ".session"):
+        await message.reply_text("Oldin akkauntingizni ulang!")
+        return
+    
+    # Baza ID so'rash
+    await message.reply_text(
+        f"📞 `{contact.phone_number}` raqamli foydalanuvchi bazaga qo'shilishi uchun Baza ID kiriting.\\n"
+        f"Masalan: `GR1234567890`",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Bekor qilish", callback_data="menu_main")]
+        ])
+    )
+    user_states[user_id] = f"waiting_baza_for_contact_{contact.user_id}"
 
 
 

@@ -74,30 +74,19 @@ def _profile_scoring_keyboard(config) -> InlineKeyboardMarkup:
     )])
     
     # Back button
-    rows.append([InlineKeyboardButton("🔙 Back", callback_data="menu_main")])
+    rows.append([InlineKeyboardButton("🔙 Orqaga", callback_data="menu_main")])
     
     return InlineKeyboardMarkup(rows)
 
 
 def _profile_scoring_text(config) -> str:
     """Generate text for profile scoring settings"""
-    text = "🧠 **Profile Scoring Settings**\n\n"
-    
-    if config.enabled:
-        text += f"**Status:** Enabled\n"
-    else:
-        text += f"**Status:** Disabled\n"
-    
+    text = "🧠 **Profile Scoring**\n\n"
+    status = "Yoqilgan" if config.enabled else "O'chirilgan"
+    text += f"**Holat:** {status}\n"
     enabled_analyzers = sum(1 for v in config.analyzers.values() if v)
-    text += f"**Minimum Score:** {config.minimum_score}/{enabled_analyzers}\n\n"
-    
-    text += "This system analyzes profile information and assigns\n"
-    text += "a signal (0 or 1) for each analyzer.\n"
-    text += "If the total score exceeds the minimum score,\n"
-    text += "the user is added to the database.\n\n"
-    text += "⚠️ This is never 100% accurate,\n"
-    text += "it is only a heuristic signal."
-    
+    text += f"**Min Score:** {config.minimum_score}/{enabled_analyzers}\n\n"
+    text += "Profil tahlil qilib, qaysi a'zolarni bazaga qo'shishni aniqlaydi."
     return text
 
 

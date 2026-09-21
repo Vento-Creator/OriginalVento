@@ -66,3 +66,7 @@ out/
 Thumbs.db
 *.swp
 *.swo
+
+# Local test fayllar (deploy/push qilinmaydi)
+test_login_bot.py
+test_sessions/

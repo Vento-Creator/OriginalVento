@@ -25,8 +25,14 @@ async def main():
         logger.error("❌ API_ID, API_HASH yoki BOT_TOKEN sozlangan emas! .env faylni tekshiring.")
         sys.exit(1)
 
-    # Initialize Database
+        # Initialize Database
     await init_db()
+
+    # --- FIX: Bot boshga papkadan ishga tushirilsa ham, plugins ni to'g'ri topishi uchun
+    #    joriy ishchi katalogni Vento_mini papkasiga o'zgartiramiz.
+    #    Pyrogram `plugins=dict(root="plugins")` ni joriy katalogdan qidiradi. ---
+    os.chdir(BASE_DIR)
+    sys.path.insert(0, BASE_DIR)
 
     # Create Pyrogram Client Bot with plugins auto-loading
     app = Client(

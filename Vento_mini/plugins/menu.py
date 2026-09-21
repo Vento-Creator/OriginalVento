@@ -84,8 +84,11 @@ async def build_main_keyboard(user_id: int):
 async def check_account_guard(cq: CallbackQuery) -> bool:
     """Tekshiruv: kamida 1 ta akkaunt ulanmagan bo'lsa, menyuga kirishni to'sadi."""
     user_id = cq.from_user.id
-    if count_accounts(user_id) == 0:
+    acc_count = count_accounts(user_id)
+    logger.info(f"Vento_mini: check_account_guard: uid={user_id}, account_count={acc_count}")
+    if acc_count == 0:
         set_user_login_state(user_id, "WAIT_PHONE", 0)
+        logger.info(f"Vento_mini: check_account_guard: account yo'q, login WAIT_PHONE ga oshirildi.")
         await cq.message.edit_text(
             "⚠️ **Sizda hali ulangan Telegram akkaunt mavjud emas!**\n\n"
             "Botdan foydalanish uchun avval Telegram akkauntingizni ulashingiz kerak.\n\n"
@@ -95,7 +98,9 @@ async def check_account_guard(cq: CallbackQuery) -> bool:
                 [InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_login")],
             ]),
         )
+        logger.info(f"Vento_mini: check_account_guard: xabar yuborildi.")
         return False
+    logger.info(f"Vento_mini: check_account_guard: account mavjud, ruxsat berildi.")
     return True
 
 
@@ -105,6 +110,8 @@ async def start_command(client: Client, message: Message):
     username = message.from_user.username
     first_name = message.from_user.first_name or "Foydalanuvchi"
 
+    logger.info(f"Vento_mini: /start yuborildi. user_id={user_id}, username={username}")
+
     await register_user(user_id, username, first_name)
     clear_user_login_state(user_id)
     _admin_input_states.pop(user_id, None)
@@ -113,6 +120,8 @@ async def start_command(client: Client, message: Message):
     accounts = get_accounts(user_id)
     active_slot = get_active_slot(user_id)
     active_acc = next((a for a in accounts if a["slot"] == active_slot), None)
+
+    logger.info(f"Vento_mini: Foydalanuvchi akkauntlari: {len(accounts)} ta, faol slot: {active_slot}")
 
     if not accounts:
         # /start -> nomer -> login (tezkor kontakt tugmasi bilan): pastda 📞 Nomerni yuborish.
@@ -124,6 +133,7 @@ async def start_command(client: Client, message: Message):
             "📱 Pastdagi **📞 Nomerni yuborish** tugmasini bosing yoki raqamingizni qo'lda yozing:\n"
             "`+998901234567`"
         )
+        logger.info(f"Vento_mini: Akkaunt yo'q, login holati WAIT_PHONE ga oshirildi.")
     else:
         acc_info = f"🟢 **{active_acc['name']}**" if active_acc else "⚠️ **Ulanmagan**"
         text = (
@@ -133,8 +143,10 @@ async def start_command(client: Client, message: Message):
             f"👥 Ulangan akkauntlar soni: {len(accounts)} ta\n\n"
             f"Quyidagi bo'limlardan birini tanlang:"
         )
+        logger.info(f"Vento_mini: Akkaunt mavjud, menyu yuborildi.")
 
     kb = await build_main_keyboard(user_id)
+    logger.info(f"Vento_mini: Keyboard tayyorlandi, xabar yuborilmoqda.")
     if not accounts:
         # /start -> nomer -> login: BITTA xabar + pastda 📞 Nomerni yuborish (1 bosishda kontakt).
         await message.reply_text(
@@ -143,6 +155,7 @@ async def start_command(client: Client, message: Message):
         )
     else:
         await message.reply_text(text, reply_markup=kb)
+    logger.info(f"Vento_mini: Xabar muvaffaqiyatli yuborildi.")
 
 
 @Client.on_callback_query(filters.regex("^cancel_login$"))
@@ -251,16 +264,24 @@ async def _open_massdm_from_text(client: Client, message: Message):
         return
     massdm_states.pop(user_id, None)
     groups = await get_all_scraped_groups(owner_id=user_id)
-    if not groups:
-        await message.reply_text(MASSDM_MESSAGES["no_groups"])
-        return
     buttons = []
     for group in groups[:10]:
         gid = group["group_id"]
         title = (group["group_title"] or f"ID: {gid}")[:30]
         buttons.append([InlineKeyboardButton(f"📁 {title}", callback_data=f"massdm_select_{gid}")])
+    # Bazalar bo'lmasa ham qo'lda user kiritish mumkin
+    buttons.append([InlineKeyboardButton("👤 Qo'lda user kiritish", callback_data="massdm_manual_users")])
     buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="massdm_cancel")])
-    await message.reply_text(MASSDM_MESSAGES["select_group"], reply_markup=InlineKeyboardMarkup(buttons))
+
+    if not groups:
+        text = (
+            "📭 **Bazalar yo'q**\n\n"
+            "👤 Lekin **Qo'lda user kiritish** orqali username(lar)ni yozib "
+            "MassDM yuborishingiz mumkin — baza yigish shart emas."
+        )
+    else:
+        text = MASSDM_MESSAGES["select_group"]
+    await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def _open_baza_from_text(client: Client, message: Message):
@@ -376,6 +397,7 @@ async def acc_add_callback(client: Client, cq: CallbackQuery):
     user_id = cq.from_user.id
     slot = int(cq.matches[0].group(1))
 
+    accounts = get_accounts(user_id)
     from session_manager import MAX_SESSIONS_PER_USER
     if len(accounts) >= MAX_SESSIONS_PER_USER:
         await cq.answer(f"❌ Maksimal {MAX_SESSIONS_PER_USER} ta akkaunt ulash mumkin!", show_alert=True)
@@ -506,10 +528,13 @@ async def handle_login_contact(client: Client, message: Message):
 async def handle_private_text(client: Client, message: Message):
     user_id = message.from_user.id
     txt = (message.text or "").strip()
+    logger.info(f"[MENU_GROUP_-5] Received text from {user_id}: '{message.text}'")
+
     # Reply-klaviatura tugmalari shu yerga tushmasligi uchun keyingi handler'ga o'tkazamiz
     if txt in {"🔍 Scraper", "🗂 Bazalar", "📨 Mass DM", "👤 Akkaunt", "👑 Admin Panel"}:
+        logger.info(f"[MENU_GROUP_-5] Reply button ignored, propagating: '{txt}'")
         raise ContinuePropagation
-    logger.info(f"[MENU_GROUP_-5] Received text from {user_id}: '{message.text}'")
+    logger.info(f"[MENU_GROUP_-5] Text processed, checking login...")
 
     # 1. Login flow state
     if await process_login_text_input(client, message):

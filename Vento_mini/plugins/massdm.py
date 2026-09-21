@@ -16,7 +16,73 @@ from plugins.menu import check_account_guard
 
 logger = logging.getLogger(__name__)
 
-# Wizard state: uid -> {"state": "WAIT_MSG"|"CONFIRM", "group_id": str, "message": str}
+
+def _serialize_entities(entities, trim_offset: int = 0) -> list | None:
+    """MessageEntity ro'yxatini dict ko'rinishida saqlash.
+
+    Premium (custom emoji) ham shu entities ichida keladi — uni saqlab
+    yuborishda qayta bersak, emoji oddiy holga tushib qolmaydi.
+    Bu fallback yo'l uchun (asosiy yo'l: copy_message).
+
+    trim_offset — matn chapidan kesilgan belgilar soni (.lstrip() tufayli);
+    entity offset'lar shunga moslab suriladi, aks holda premium emoji
+    noto'g'ri joyga tushadi yoki Telegram entity xatosi beradi.
+    """
+    if not entities:
+        return None
+    out = []
+    for ent in entities:
+        try:
+            off = getattr(ent, "offset", 0) - trim_offset
+            ln = getattr(ent, "length", 0)
+            if off < 0:
+                # Kesilgan qismga teggan entity — uzunligini qisqartiramiz
+                ln = ln + off
+                off = 0
+            if ln <= 0:
+                continue
+            d = {
+                "type": getattr(ent.type, "name", str(ent.type)) if getattr(ent, "type", None) else None,
+                "offset": off,
+                "length": ln,
+            }
+            for attr in ("url", "language", "custom_emoji_id", "date_time_format"):
+                val = getattr(ent, attr, None)
+                if val is not None:
+                    if attr == "custom_emoji_id":
+                        # custom_emoji_id int bo'lishi shart (str bo'lsa premium ishlamaydi)
+                        try:
+                            d[attr] = int(val)
+                        except (ValueError, TypeError):
+                            continue
+                    elif attr == "date_time_format":
+                        d[attr] = str(val)
+                    else:
+                        d[attr] = val
+            usr = getattr(ent, "user", None)
+            if usr is not None:
+                try:
+                    d["user"] = {
+                        "id": usr.id,
+                        "is_bot": getattr(usr, "is_bot", False),
+                        "first_name": getattr(usr, "first_name", "") or "user",
+                    }
+                    d["user_id"] = usr.id  # eski format bilan moslik
+                except Exception:
+                    pass
+            ut = getattr(ent, "unix_time", None)
+            if ut is not None:
+                try:
+                    d["unix_time"] = int(ut)
+                except Exception:
+                    pass
+            out.append(d)
+        except Exception:
+            continue
+    return out or None
+
+# Wizard state: uid -> {"state": "WAIT_MSG"|"CONFIRM", "group_id": str, "message": str,
+#   "entities": [...], "from_chat_id": int, "source_msg_id": int}
 massdm_states = {}
 
 # Delete wizard state: uid -> {"revoke": bool}
@@ -52,10 +118,6 @@ async def massdm_menu_callback(client: Client, cq: CallbackQuery):
     massdm_states.pop(user_id, None)
 
     groups = await get_all_scraped_groups(owner_id=user_id)
-    if not groups:
-        await cq.message.edit_text(MASSDM_MESSAGES["no_groups"])
-        await cq.answer()
-        return
 
     buttons = []
     for group in groups[:10]:
@@ -65,11 +127,45 @@ async def massdm_menu_callback(client: Client, cq: CallbackQuery):
             InlineKeyboardButton(f"📁 {title}", callback_data=f"massdm_select_{gid}")
         ])
 
+    # Bazalar bo'lmasa ham qo'lda user kiritish mumkin (baza yigmasdan MassDM)
+    buttons.append([InlineKeyboardButton("👤 Qo'lda user kiritish", callback_data="massdm_manual_users")])
     buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="massdm_cancel")])
 
+    if not groups:
+        menu_text = (
+            "📭 **Bazalar yo'q**\n\n"
+            "👤 Lekin **Qo'lda user kiritish** orqali username(lar)ni yozib "
+            "MassDM yuborishingiz mumkin — baza yigish shart emas."
+        )
+    else:
+        menu_text = MASSDM_MESSAGES["select_group"]
+
     await cq.message.edit_text(
-        MASSDM_MESSAGES["select_group"],
+        menu_text,
         reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^massdm_manual_users$"))
+async def massdm_manual_users_callback(client: Client, cq: CallbackQuery):
+    user_id = cq.from_user.id
+
+    if is_massdm_running(user_id):
+        await cq.answer("⚠️ Sizda allaqachon aktiv MassDM bor!", show_alert=True)
+        return
+
+    massdm_states[user_id] = {"state": "WAIT_USERS"}
+
+    await cq.message.edit_text(
+        "👤 **Qo'lda user kiritish**\n\n"
+        "MassDM yuboriladigan username(lar)ni yuboring:\n\n"
+        "_Masalan:_\n"
+        "`@username1 @username2 @username3`\n\n"
+        "Probel, vergul yoki yangi qator bilan ajratishingiz mumkin.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(BUTTON_CANCEL, callback_data="massdm_cancel")]
+        ])
     )
     await cq.answer()
 
@@ -94,22 +190,149 @@ async def massdm_select_group_callback(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
+def _is_valid_username_format(username: str) -> bool:
+    """Tezkor username tekshiruvi (get_users chaqirmasdan)."""
+    if not username or len(username) < 5:
+        return False
+    if username.lower().endswith("bot"):  # bot suffix
+        return False
+    # Channel ID pattern: @cxxxxxxxxxx
+    if username.startswith("c") and len(username) >= 10 and username[1:].isdigit():
+        return False
+    # Faqat harflar, sonlar, _ va . bo'lishi kerak
+    if not username.replace("_", "").replace(".", "").isalnum():
+        return False
+    return True
+
+
 @Client.on_message(filters.private & filters.text, group=-1)
 async def massdm_message_handler(client: Client, message: Message):
     user_id = message.from_user.id
     state_info = massdm_states.get(user_id)
 
+    # Qo'lda user kiritish rejimi
+    if state_info and state_info.get("state") == "WAIT_USERS":
+        raw = (message.text or "").strip()
+        # Buyruqlar (/start va h.k.) username sifatida yutilmasin
+        if raw.startswith("/"):
+            raise ContinuePropagation
+        if not raw:
+            await message.reply_text("❌ Username(lar)ni yuboring.")
+            return
+
+        targets = [
+            t.strip().lstrip("@")
+            for t in raw.replace(",", " ").split()
+            if t.strip()
+        ]
+        valid = [t for t in targets if _is_valid_username_format(t)]
+        invalid_count = len(targets) - len(valid)
+
+        if not valid:
+            await message.reply_text(
+                "❌ Hech qanday to'g'ri username topilmadi.\n\n"
+                "Format: `@username` (faqat harflar, sonlar, `_`, `.`)"
+            )
+            return
+
+        manual_members = [{"username": t, "user_id": 0, "first_name": ""} for t in valid]
+        massdm_states[user_id] = {
+            "state": "WAIT_MSG",
+            "group_id": None,
+            "manual_members": manual_members,
+        }
+
+        note = (
+            f"\n⚠️ {invalid_count} ta noto'g'ri formatdagi user tashlab yuborildi."
+            if invalid_count
+            else ""
+        )
+        await message.reply_text(
+            f"✅ {len(valid)} ta user qabul qilindi.{note}\n\n"
+            "📨 Endi ularga yuboriladigan xabarni yozing —\n"
+            "xabar yuborishingiz bilan MassDM **avtomatik boshlanadi**.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(BUTTON_CANCEL, callback_data="massdm_cancel")]
+            ])
+        )
+        return
+
     if not state_info or state_info.get("state") != "WAIT_MSG":
         raise ContinuePropagation
 
-    message_text = (message.text or "").strip()
+    raw_text = (message.text or "")
+    # .strip() offset'larni buzadi (premium emoji noto'g'ri joyga tushadi),
+    # shuning uchun chapdagi bo'shliqni hisoblab entity offset'ni to'g'rilaymiz.
+    lstripped = raw_text.lstrip()
+    ltrim = len(raw_text) - len(lstripped)
+    message_text = lstripped.strip()
+    # Premium emoji (custom_emoji_id) entities ichida keladi — saqlab qo'yamiz,
+    # aks holda yuborishda oddiy emoji bo'lib qoladi.
+    entities_keep = _serialize_entities(getattr(message, "entities", None), trim_offset=ltrim)
+
+    # --- Qo'lda kiritilgan userlar: xabar yuborilishi bilan AVTOMATIK boshlanadi ---
+    # (baza oqimida esa CONFIRM tasdiqlash bosiladi)
+    if state_info.get("manual_members"):
+        manual = state_info["manual_members"]
+        massdm_states.pop(user_id, None)
+
+        if is_massdm_running(user_id):
+            await message.reply_text("⚠️ Sizda allaqachon aktiv MassDM bor!")
+            return
+
+        # Status xabari botniki bo'lishi shart — bot faqat o'z xabarini
+        # tahrirlab progress ko'rsatadi (user xabarini tahrirlay olmaydi).
+        status_msg = await message.reply_text(
+            f"🚀 **MassDM boshlanmoqda...**\n\n"
+            f"👤 Qo'lda kiritilgan **{len(manual)} ta** userga yuborilmoqda.\n"
+            f"✍️ Xabar:\n{message_text[:200]}..."
+        )
+        ok, err = await MassDMService.start_massdm(
+            user_id=user_id,
+            bot_client=client,
+            chat_id=message.chat.id,
+            status_msg_id=status_msg.id,
+            group_id=None,
+            text_message=message_text,
+            entities=entities_keep,
+            from_chat_id=message.chat.id,
+            source_msg_id=message.id,
+            members=manual,
+        )
+        if not ok:
+            await status_msg.edit_text(f"❌ {err}")
+            return
+
+        await status_msg.edit_text(
+            f"🚀 **MassDM boshlandi!**\n\n"
+            f"👤 Qo'lda kiritilgan **{len(manual)} ta** userga yuborilmoqda.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(BUTTON_STOP, callback_data="massdm_stop")]
+            ])
+        )
+        return
+
+    # copy_message manbai — BOT bilan bo'lgan chat (message.chat.id).
+    # DM chat id = bot user id bo'ladi, lekin to'g'ridan-to'g'ri
+    # message.chat.id olsak ishonchliroq bo'ladi.
     massdm_states[user_id] = {
         "state": "CONFIRM",
         "group_id": state_info["group_id"],
+        "manual_members": state_info.get("manual_members"),
         "message": message_text,
+        "entities": entities_keep,
+        "from_chat_id": message.chat.id,
+        "source_msg_id": message.id,
     }
 
-    preview = f"📁 Baza: `{state_info['group_id']}`\n\n✍️ Xabar:\n{message_text[:200]}..."
+    # Preview: qo'lda kiritilgan userlar yoki baza
+    if state_info.get("manual_members"):
+        preview = (
+            f"👤 Qo'lda kiritilgan userlar: **{len(state_info['manual_members'])} ta**\n\n"
+            f"✍️ Xabar:\n{message_text[:200]}..."
+        )
+    else:
+        preview = f"📁 Baza: `{state_info['group_id']}`\n\n✍️ Xabar:\n{message_text[:200]}..."
 
     await message.reply_text(
         f"{MASSDM_MESSAGES['confirm_start']}\n\n{preview}",
@@ -145,6 +368,10 @@ async def massdm_confirm_callback(client: Client, cq: CallbackQuery):
         status_msg_id=cq.message.id,
         group_id=group_id,
         text_message=message_text,
+        entities=state_info.get("entities"),
+        from_chat_id=state_info.get("from_chat_id"),
+        source_msg_id=state_info.get("source_msg_id"),
+        members=state_info.get("manual_members"),
     )
 
     if not ok:

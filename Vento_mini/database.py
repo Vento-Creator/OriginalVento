@@ -47,6 +47,11 @@ async def init_db():
             )
         """)
         await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_baza_members_baza_id ON baza_members(baza_id)
+        """)
+        await db.commit()
+        logger.info("baza_members jadvali yaratildi (tg_user_id bilan).")
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id INTEGER PRIMARY KEY,
                 utag_speed REAL DEFAULT 1.5,
@@ -83,12 +88,44 @@ async def init_db():
         """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS scraped_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
                 username TEXT,
                 first_name TEXT,
-                group_id TEXT,
-                PRIMARY KEY (user_id, group_id)
+                group_id TEXT
             )
+        """)
+        # Eski sxemadan migratsiya: PRIMARY KEY (user_id, group_id) bo'lgan jadvalda
+        # qo'lda qo'shilgan userlar (user_id=0) bir-birini bosib ketardi — faqat 1 tasi
+        # saqlanardi. Endi har bir qator o'z `id` si bilan saqlanadi.
+        # Mavjud (scraperda yig'ilgan) ma'lumotlar to'liq saqlanadi.
+        async with db.execute("PRAGMA table_info(scraped_members)") as cursor:
+            cols = [r[1] for r in await cursor.fetchall()]
+        if cols and "id" not in cols:
+            await db.execute("ALTER TABLE scraped_members RENAME TO scraped_members_old")
+            await db.execute("""
+                CREATE TABLE scraped_members (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    username TEXT,
+                    first_name TEXT,
+                    group_id TEXT
+                )
+            """)
+            await db.execute("""
+                INSERT INTO scraped_members (user_id, username, first_name, group_id)
+                SELECT user_id, username, first_name, group_id FROM scraped_members_old
+            """)
+            await db.execute("DROP TABLE scraped_members_old")
+            logger.info("scraped_members eski sxemadan yangi sxemaga migratsiya qilindi.")
+        # Tez sahifalash uchun indekslar
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scraped_members_group
+            ON scraped_members(group_id, id)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scraped_members_group_username
+            ON scraped_members(group_id, username)
         """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS banned_users (
@@ -325,39 +362,109 @@ async def add_scraped_group(group_id: str, group_title: str, date_scraped: int, 
 
 
 async def add_scraped_members_batch(batch: List[tuple]):
-    """batch: [(user_id, username, first_name, group_id), ...]"""
+    """batch: [(user_id, username, first_name, group_id), ...]
+
+    Scraper uchun. Duplikatlarni user_id+group_id bo'yicha filtrlaydi
+    (eski PRIMARY KEY (user_id, group_id) xulqini saqlaydi).
+    """
+    if not batch:
+        return
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.executemany(
-            """
-            INSERT INTO scraped_members (user_id, username, first_name, group_id)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (user_id, group_id) DO NOTHING
-        """,
-            batch,
-        )
+        # Bir batch ichida bir xil group_id lar bo'lishi mumkin —
+        # har bir group uchun mavjud user_id larni bir marta o'qiymiz.
+        by_group: Dict[str, List[tuple]] = {}
+        for row in batch:
+            by_group.setdefault(row[3], []).append(row)
+
+        for group_id, rows in by_group.items():
+            async with db.execute(
+                "SELECT user_id FROM scraped_members WHERE group_id = ?",
+                (group_id,),
+            ) as cursor:
+                existing = {r[0] for r in await cursor.fetchall()}
+            fresh = [r for r in rows if r[0] not in existing]
+            if fresh:
+                await db.executemany(
+                    """
+                    INSERT INTO scraped_members (user_id, username, first_name, group_id)
+                    VALUES (?, ?, ?, ?)
+                """,
+                    fresh,
+                )
         await db.commit()
 
 
 async def add_scraped_member(user_id: int, username: str, first_name: str, group_id: str):
+    """Bitta a'zo qo'shish.
+
+    user_id != 0 (scraper useri) — user_id+group_id bo'yicha dedup.
+    user_id == 0 (qo'lda qo'shilgan) — username+group_id bo'yicha dedup.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
+        if user_id:
+            async with db.execute(
+                "SELECT 1 FROM scraped_members WHERE group_id = ? AND user_id = ?",
+                (group_id, user_id),
+            ) as cursor:
+                exists = await cursor.fetchone()
+        else:
+            # Telegram username lar case-insensitive — NOCASE bilan tekshiramiz
+            async with db.execute(
+                "SELECT 1 FROM scraped_members WHERE group_id = ? AND username = ? COLLATE NOCASE",
+                (group_id, username),
+            ) as cursor:
+                exists = await cursor.fetchone()
+        if not exists:
+            await db.execute(
+                """
+                INSERT INTO scraped_members (user_id, username, first_name, group_id)
+                VALUES (?, ?, ?, ?)
+            """,
+                (user_id, username, first_name, group_id),
+            )
+            await db.commit()
+
+
+async def add_manual_member(group_id: str, username: str) -> bool:
+    """Qo'lda username qo'shish (user_id=0). Duplikat bo'lsa False qaytaradi.
+
+    Telegram username lar katta-kichik harfga sezgir emas — dedup NOCASE.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM scraped_members WHERE group_id = ? AND username = ? COLLATE NOCASE",
+            (group_id, username),
+        ) as cursor:
+            exists = await cursor.fetchone()
+        if exists:
+            return False
         await db.execute(
             """
             INSERT INTO scraped_members (user_id, username, first_name, group_id)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (user_id, group_id) DO NOTHING
+            VALUES (0, ?, '', ?)
         """,
-            (user_id, username, first_name, group_id),
+            (username, group_id),
         )
         await db.commit()
+        return True
 
 
 async def add_manual_members(group_id: str, members: List[Dict]):
-    """Qo'lda a'zolar qo'shish"""
-    rows = [
+    """Qo'lda a'zolar qo'shish.
+
+    user_id==0 bo'lganlar (username orqali) — username bo'yicha dedup;
+    qolganlari — user_id bo'yicha dedup (add_scraped_members_batch orqali).
+    """
+    with_id = [
         (m.get("user_id"), m.get("username"), m.get("first_name", ""), group_id)
         for m in members
+        if m.get("user_id")
     ]
-    await add_scraped_members_batch(rows)
+    name_only = [m.get("username") for m in members if not m.get("user_id") and m.get("username")]
+    if with_id:
+        await add_scraped_members_batch(with_id)
+    for uname in name_only:
+        await add_manual_member(group_id, uname)
 
 
 async def get_group_id_by_title(group_title: str, owner_id: int = None):
@@ -428,15 +535,46 @@ async def get_group_member_count(group_id: str) -> int:
 
 
 async def get_members_by_group_paginated(group_id: str, offset: int = 0, limit: int = 50) -> List[Dict]:
-    """Guruh a'zolarini sahifalab olish"""
+    """Guruh a'zolarini sahifalab olish (qo'shilish tartibida: id bo'yicha)."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT user_id, username, first_name FROM scraped_members WHERE group_id = ? LIMIT ? OFFSET ?",
+            "SELECT id, user_id, username, first_name FROM scraped_members WHERE group_id = ? ORDER BY id LIMIT ? OFFSET ?",
             (group_id, limit, offset),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+
+
+async def get_member_by_index(group_id: str, index: int) -> Optional[Dict]:
+    """1-based tartib raqam bo'yicha a'zoni olish (tahrirlashda o'chirish uchun).
+
+    Qaytaradi: {"id": ..., "user_id": ..., "username": ..., "first_name": ...}
+    Tartib — qo'shilish tartibi (id ASC), ro'yxatdagi ko'rinadigan raqamlar bilan mos.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, user_id, username, first_name FROM scraped_members WHERE group_id = ? ORDER BY id LIMIT 1 OFFSET ?",
+            (group_id, max(0, index - 1)),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def delete_scraped_member_by_row_id(group_id: str, row_id: int) -> int:
+    """Bazadan aynan bitta qatorni (id bo'yicha) o'chirish.
+
+    Username'siz (faqat ID li) userlarni ham o'chiradi.
+    O'chirilgan qatorlar sonini qaytaradi.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM scraped_members WHERE group_id = ? AND id = ?",
+            (group_id, row_id),
+        )
+        await db.commit()
+        return cursor.rowcount or 0
 
 
 async def delete_scraped_group(group_id: str):

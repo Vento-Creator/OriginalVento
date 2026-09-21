@@ -13,8 +13,11 @@ _user_clients = {}
 _client_last_used = {}
 _user_locks = {}
 
-MAX_CONCURRENT_SESSIONS = 50
+MAX_CONCURRENT_SESSIONS = 100
 MAX_SESSIONS_PER_USER = 20  # Har bir user uchun maksimal parallel session
+# 30 daqiqa ishlatilmagan session avtomatik yopiladi (xotira bo'shatiladi).
+# Yopilgan client keyingi ishlatishda qayta ochiladi — foydalanuvchi sezmaydi.
+IDLE_SESSION_TIMEOUT = 30 * 60
 
 
 def _accounts_path(user_id: int) -> str:
@@ -157,6 +160,16 @@ async def get_user_client_slot(user_id: int, slot: int = 0) -> Client:
         if client is not None and client.is_connected:
             return client
 
+        # Jami ochiq clientlar limiti — 100 ta (MAX_CONCURRENT_SESSIONS)
+        if len(_user_clients) >= MAX_CONCURRENT_SESSIONS:
+            raise Exception(
+                f"⚠️ Serverda hozircha ko'p sessiya ochiq "
+                f"({MAX_CONCURRENT_SESSIONS})! Iltimos, keyinroq urinib ko'ring."
+            )
+
+        # Eskirgan (unused) clientlarni avtomatik yopish — xotirani tozalaydi
+        await _cleanup_idle_clients()
+
         client = _build_user_client(user_id, slot)
         _user_clients[key] = client
 
@@ -185,6 +198,20 @@ async def close_user_client_slot(user_id: int, slot: int):
         if client and client.is_connected:
             try:
                 await asyncio.wait_for(client.disconnect(), timeout=10.0)
+            except Exception:
+                pass
+
+
+async def _cleanup_idle_clients():
+    """30 daqiqa davomida ishlatilmagan clientlarni yopadi (xotira tozalash)."""
+    now = time.time()
+    for key, last_used in list(_client_last_used.items()):
+        if now - last_used > IDLE_SESSION_TIMEOUT:
+            uid, slot = key
+            try:
+                client = _user_clients.get(key)
+                if client and client.is_connected:
+                    await close_user_client_slot(uid, slot)
             except Exception:
                 pass
 

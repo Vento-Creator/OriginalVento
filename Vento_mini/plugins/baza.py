@@ -13,7 +13,9 @@ from database import (
     generate_unique_group_id,
     add_scraped_group,
     get_members_by_group_paginated,
-    add_scraped_member,
+    get_member_by_index,
+    delete_scraped_member_by_row_id,
+    add_manual_member,
 )
 from session_manager import get_user_client
 from plugins.menu import check_account_guard
@@ -41,9 +43,27 @@ def _safe_title(group_title, group_id):
     return first_line
 
 
-# uid -> "waiting_baza_search_id" / "waiting_baza_clear_id" /
-#        "waiting_baza_add|{gid}" / "waiting_baza_name_for_users" / "waiting_users_for_baza|{title}"
+# uid -> "waiting_baza_search_id" / "waiting_baza_clear_id" / "waiting_baza_edit|{gid}"
 _baza_states = {}
+
+# Tahrirlash oqimi uchun vaqtinchalik holatlar
+_baza_edit_add: dict = {}  # uid -> {"gid": ..., "targets": [...]}
+_baza_edit_del: dict = {}  # uid -> {"gid": ..., "username": ..., "index": ..., "display": ...}
+
+
+def _is_valid_username_format(username: str) -> bool:
+    """Tezkor username tekshiruvi (get_users chaqirmasdan)."""
+    if not username or len(username) < 5:
+        return False
+    if username.lower().endswith("bot"):  # bot suffix
+        return False
+    # Channel ID pattern: @cxxxxxxxxxx
+    if username.startswith("c") and len(username) >= 10 and username[1:].isdigit():
+        return False
+    # Faqat harflar, sonlar, _ va . bo'lishi kerak
+    if not username.replace("_", "").replace(".", "").isalnum():
+        return False
+    return True
 
 
 @Client.on_callback_query(filters.regex("^(admin_baza|baza_menu)$"))
@@ -79,7 +99,6 @@ async def _show_baza_page(cq: CallbackQuery, uid: int, page: int):
             reply_markup=InlineKeyboardMarkup(
                 [
                     [InlineKeyboardButton("🔍 Scraperni ochish", callback_data="menu_scraper")],
-                    [InlineKeyboardButton("➕ Yangi user(lar) qo'shish", callback_data="baza_new_users_start")],
                     [_home_btn()],
                 ]
             ),
@@ -118,7 +137,6 @@ async def _show_baza_page(cq: CallbackQuery, uid: int, page: int):
 
     buttons.append([InlineKeyboardButton("🔍 ID orqali qidirish", callback_data="baza_search_id")])
     buttons.append([InlineKeyboardButton("🧹 Bazani tozalash", callback_data="baza_clear_menu")])
-    buttons.append([InlineKeyboardButton("➕ Yangi user(lar) qo'shish", callback_data="baza_new_users_start")])
     buttons.append([_home_btn()])
 
     await cq.message.edit_text(
@@ -158,7 +176,7 @@ async def baza_open_callback(client: Client, cq: CallbackQuery):
                 ],
                 [
                     InlineKeyboardButton(
-                        "➕ User qo'shish", callback_data=f"baza_add_{gid}"
+                        "✏️ Bazani tahrirlash", callback_data=f"baza_edit_{gid}"
                     )
                 ],
                 [
@@ -182,39 +200,67 @@ async def baza_open_callback(client: Client, cq: CallbackQuery):
 async def baza_list_callback(client: Client, cq: CallbackQuery):
     uid = cq.from_user.id
     gid = cq.matches[0].group(1)
-    page = int(cq.matches[0].group(2))
+    offset = int(cq.matches[0].group(2))
     limit = 50
-    offset = page * limit
 
-    members = await get_members_by_group_paginated(gid, offset, limit)
     total = await get_group_member_count(gid)
     group = await get_group_info(gid)
 
-    if not members:
+    if total == 0:
+        await cq.answer("Bazada a'zo yo'q.", show_alert=True)
+        return
+
+    # Telegram xabar limiti 4096 harf — belgilarga ham hisobga olib sahifalaymiz.
+    MAX_CHARS = 3900
+    header = f"👥 **Ro'yxat** (jami {total} ta)\n\n"
+    body = []
+    cur_len = len(header)
+    shown = 0
+    next_offset = offset
+
+    while next_offset < total and shown < limit:
+        batch = await get_members_by_group_paginated(gid, next_offset, limit)
+        if not batch:
+            break
+        page_done = False
+        for m in batch:
+            if m["username"]:
+                line = f"{next_offset + 1}. @{m['username']}"
+            else:
+                line = f"{next_offset + 1}. [ID: {m['user_id']}](tg://user?id={m['user_id']})"
+            if cur_len + len(line) + 1 > MAX_CHARS and shown > 0:
+                page_done = True
+                break
+            body.append(line)
+            cur_len += len(line) + 1
+            shown += 1
+            next_offset += 1
+        if page_done or len(batch) < limit:
+            break
+
+    if not body:
         await cq.answer("Bu sahifada a'zo yo'q.", show_alert=True)
         return
 
     lines = [
-        f"({offset + 1}-{offset + len(members)})\n"
+        header
+        + "\n".join(body)
+        + f"\n\n📊 Ko'rsatildi: {offset + 1}-{next_offset} / {total}"
+        + "\nℹ️ O'chirish uchun tahrirlashda tartib raqamini yuboring."
     ]
-    for m in members:
-        if m["username"]:
-            u = f"@{m['username']}"
-        else:
-            u = f"[{m['user_id']}](tg://user?id={m['user_id']})"
-        lines.append(u)
 
     nav = []
-    if page > 0:
+    if offset > 0:
+        prev_offset = max(0, offset - limit)
         nav.append(
             InlineKeyboardButton(
-                "⬅️ Oldingi", callback_data=f"baza_list_{gid}_{page - 1}"
+                "⬅️ Oldingi", callback_data=f"baza_list_{gid}_{prev_offset}"
             )
         )
-    if offset + limit < total:
+    if next_offset < total:
         nav.append(
             InlineKeyboardButton(
-                "Keyingi ➡️", callback_data=f"baza_list_{gid}_{page + 1}"
+                "Keyingi ➡️", callback_data=f"baza_list_{gid}_{next_offset}"
             )
         )
 
@@ -229,8 +275,8 @@ async def baza_list_callback(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@Client.on_callback_query(filters.regex(r"^baza_add_(.+)$"))
-async def baza_add_callback(client: Client, cq: CallbackQuery):
+@Client.on_callback_query(filters.regex(r"^baza_edit_(.+)$"))
+async def baza_edit_callback(client: Client, cq: CallbackQuery):
     uid = cq.from_user.id
     gid = cq.matches[0].group(1)
 
@@ -239,11 +285,16 @@ async def baza_add_callback(client: Client, cq: CallbackQuery):
         await cq.answer("⛔️ Ruxsat yo'q!", show_alert=True)
         return
 
-    _baza_states[uid] = f"waiting_baza_add|{gid}"
+    _baza_states[uid] = f"waiting_baza_edit|{gid}"
     await cq.message.edit_text(
-        "➕ **User qo'shish**\n\n"
-        "Username yoki ID larni yuboring (har birini yangi qatorga):\n\n"
-        "Masalan:\n`@username1\n@username2\n123456789`",
+        "✏️ **Bazani tahrirlash**\n\n"
+        "**1️⃣ User O'CHIRISH:**\n"
+        "O'chirmoqchi bo'lgan userning **tartib raqamini** yuboring.\n"
+        "_Masalan: `5` — 5-turdagi user o'chiriladi_\n\n"
+        "**2️⃣ User QO'SHISH:**\n"
+        "Yangi username(lar)ni yuboring (probel yoki yangi qator bilan).\n"
+        "_Masalan: `@username1 @username2`_\n\n"
+        "⚠️ Notog'ri formatdagi userlar qabul qilinmaydi.",
         reply_markup=InlineKeyboardMarkup(
             [
                 [
@@ -267,8 +318,39 @@ async def baza_send_callback(client: Client, cq: CallbackQuery):
         await cq.answer("⛔️ Ruxsat yo'q!", show_alert=True)
         return
 
+    cnt = await get_group_member_count(gid)
+    await cq.message.edit_text(
+        f"📨 **Xabar yuborish**\n\n"
+        f"**{group['group_title']}** bazasidagi **{cnt} ta** foydalanuvchiga xabar yuboriladi.\n\n"
+        f"❓ Tasdiqlaysizmi?",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ Ha, tasdiqlayman!", callback_data=f"baza_send_ok_{gid}"
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Yo'q! Adashdim", callback_data=f"baza_open_{gid}"
+                    ),
+                ]
+            ]
+        ),
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^baza_send_ok_(.+)$"))
+async def baza_send_ok_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    gid = cq.matches[0].group(1)
+
+    group = await get_group_info(gid)
+    if not group or group.get("owner_id") != uid:
+        await cq.answer("⛔️ Ruxsat yo'q!", show_alert=True)
+        return
+
     # MassDM wizard'ni shu baza bilan boshlaymiz
-    from plugins.massdm import massdm_states, MASSDM_MESSAGES
+    from plugins.massdm import massdm_states
     massdm_states[uid] = {"state": "WAIT_MSG", "group_id": gid}
 
     await cq.message.edit_text(
@@ -305,10 +387,42 @@ async def baza_del_confirm_callback(client: Client, cq: CallbackQuery):
             [
                 [
                     InlineKeyboardButton(
-                        "✅ Ha, o'chirish", callback_data=f"baza_del_do_{gid}"
+                        "✅ Ha, davom etish", callback_data=f"baza_del_final_{gid}"
                     ),
                     InlineKeyboardButton(
                         "❌ Yo'q, orqaga", callback_data=f"baza_open_{gid}"
+                    ),
+                ]
+            ]
+        ),
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^baza_del_final_(.+)$"))
+async def baza_del_final_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    gid = cq.matches[0].group(1)
+
+    group = await get_group_info(gid)
+    if not group:
+        await cq.answer("Baza topilmadi!", show_alert=True)
+        return
+
+    cnt = await get_group_member_count(gid)
+    await cq.message.edit_text(
+        f"🚨 **OXIRGI TASDIQLASH!**\n\n"
+        f"**{group['group_title']}** bazasi va undagi **{cnt} ta** a'zo butunlay o'chiriladi.\n\n"
+        f"⛔️ **Bu amalni QAYTARIB BO'LMAYDI!**\n\n"
+        f"Rostdan ham o'chirasizmi?",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "🗑 Tushundim, o'chirish!", callback_data=f"baza_del_do_{gid}"
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Yo'q, bekor qilish", callback_data=f"baza_open_{gid}"
                     ),
                 ]
             ]
@@ -438,7 +552,7 @@ async def baza_clear_select_callback(client: Client, cq: CallbackQuery):
             [
                 [
                     InlineKeyboardButton(
-                        "✅ Ha, tozalash", callback_data=f"baza_del_do_{gid}"
+                        "✅ Ha, davom etish", callback_data=f"baza_del_final_{gid}"
                     ),
                     InlineKeyboardButton(
                         "❌ Yo'q, orqaga", callback_data="baza_clear_menu"
@@ -450,26 +564,16 @@ async def baza_clear_select_callback(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@Client.on_callback_query(filters.regex("^baza_new_users_start$"))
-async def baza_new_users_start_callback(client: Client, cq: CallbackQuery):
-    uid = cq.from_user.id
-    _baza_states[uid] = "waiting_baza_name_for_users"
-    await cq.message.edit_text(
-        "➕ **Yangi user(lar) qo'shish**\n\n"
-        "Yangi bazaning nomini yuboring:",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("❌ Bekor qilish", callback_data="admin_baza")]]
-        ),
-    )
-    await cq.answer()
-
-
 @Client.on_message(filters.private & filters.text, group=-2)
 async def baza_state_handler(client: Client, message: Message):
     uid = message.from_user.id
     state = _baza_states.get(uid)
 
     if not state:
+        raise ContinuePropagation
+
+    # Buyruqlar (/start, /menu va h.k.) hech qachon baza holati sifatida yutilmasin
+    if (message.text or "").strip().startswith("/"):
         raise ContinuePropagation
 
     if state == "waiting_baza_search_id":
@@ -537,7 +641,7 @@ async def baza_state_handler(client: Client, message: Message):
                 [
                     [
                         InlineKeyboardButton(
-                            "✅ Ha, tozalash", callback_data=f"baza_del_do_{gid}"
+                            "✅ Ha, davom etish", callback_data=f"baza_del_final_{gid}"
                         ),
                         InlineKeyboardButton(
                             "❌ Yo'q, orqaga", callback_data="baza_clear_menu"
@@ -548,147 +652,116 @@ async def baza_state_handler(client: Client, message: Message):
         )
         return
 
-    if state.startswith("waiting_baza_add|"):
-        gid = state.replace("waiting_baza_add|", "")
+    if state.startswith("waiting_baza_edit|"):
+        gid = state.replace("waiting_baza_edit|", "")
         group = await get_group_info(gid)
         if not group or group.get("owner_id") != uid:
             await message.reply_text("❌ Ruxsat yo'q!")
             return
-        _baza_states.pop(uid, None)
-        lines = message.text.strip().split()
-        targets = [l.strip().lstrip("@") for l in lines if l.strip()]
 
-        msg = await message.reply_text(f"🔄 {len(targets)} ta user tekshirilmoqda...")
+        raw = (message.text or "").strip()
+        if not raw:
+            await message.reply_text("❌ Tartib raqam yoki username yuboring.")
+            return
 
-        added = 0
-        failed = 0
-
-        try:
-            from pyrogram.errors import FloodWait
-
-            user_client = await get_user_client_or_none(uid)
-            if not user_client:
-                await msg.edit_text("❌ Akkauntingiz ulanmagan. Avval /start bosing.")
+        # 1) Raqam kiritilsa — o'sha tartib raqamdagi user O'CHIRILADI
+        if raw.isdigit():
+            idx = int(raw)
+            total = await get_group_member_count(gid)
+            if idx < 1 or idx > total:
+                await message.reply_text(
+                    f"❌ Tartib raqam **1..{total}** oralig'ida bo'lishi kerak."
+                )
+                return
+            m = await get_member_by_index(gid, idx)
+            if not m:
+                await message.reply_text("❌ Bu raqamdagi user topilmadi.")
                 return
 
-            for i, username in enumerate(targets, 1):
-                try:
-                    u = await user_client.get_users(username)
-                    await add_scraped_member(u.id, u.username, u.first_name, gid)
-                    added += 1
-                except FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
-                    try:
-                        u = await user_client.get_users(username)
-                        await add_scraped_member(u.id, u.username, u.first_name, gid)
-                        added += 1
-                    except Exception:
-                        failed += 1
-                except Exception:
-                    failed += 1
-
-                await asyncio.sleep(0.3)
-                if i % 10 == 0:
-                    try:
-                        await msg.edit_text(
-                            f"🔄 {i} / {len(targets)} ta user tekshirilmoqda...\nIltimos kuting..."
-                        )
-                    except Exception:
-                        pass
-                    await asyncio.sleep(2)
-        except Exception as e:
-            await msg.edit_text(f"❌ Xatolik: {e}")
-            return
-
-        await msg.edit_text(
-            f"✅ Natija:\n\n✔️ Qo'shildi: **{added}** ta\n❌ Xato: **{failed}** ta",
-            reply_markup=InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "📂 Bazani ko'rish", callback_data=f"baza_open_{gid}"
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            "🏠 Bosh menyu", callback_data="menu_main"
-                        )
-                    ],
-                ]
-            ),
-        )
-        return
-
-
-    if state == "waiting_baza_name_for_users":
-        title = message.text.strip().split("\n")[0].strip()[:40]
-        if not title:
-            await message.reply_text("❌ Baza nomi bo'sh bo'lishi mumkin emas!")
-            return
-        _baza_states[uid] = f"waiting_users_for_baza|{title}"
-        await message.reply_text(
-            f"📁 **Baza nomi: {title}**\n\n"
-            "Endi qo'shmoqchi bo'lgan userlarni yuboring.\n\n"
-            "Formatlar:\n"
-            "• Matn: `@username1\n@username2\n@username3`\n"
-            "• Forward: Forward xabar yuboring\n\n"
-            "Faqat @username bo'lgan userlarni yuboring!",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("❌ Bekor qilish", callback_data="admin_baza")]]
-            ),
-        )
-        return
-
-    if state.startswith("waiting_users_for_baza|") and message.text:
-        title = state.replace("waiting_users_for_baza|", "")
-        targets = [
-            t.strip().lstrip("@")
-            for t in message.text.replace(",", " ").split()
-            if t.strip()
-        ]
-        if not targets:
+            display = (
+                f"@{m['username']}" if m["username"] else f"ID: {m['user_id']}"
+            )
+            _baza_states.pop(uid, None)
+            _baza_edit_del[uid] = {
+                "gid": gid,
+                "row_id": m["id"],
+                "display": display,
+            }
             await message.reply_text(
-                "Faqat @username formatida kiriting (masalan: @username1)",
+                f"🗑 **O'chirish tasdiqlashi**\n\n"
+                f"**{idx}**-tartib raqamdagi user: **{display}**\n\n"
+                f"O'sha user bazadan o'chirilsinmi?",
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("❌ Bekor qilish", callback_data="admin_baza")]]
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "✅ Ha, o'chirish!", callback_data="baza_edit_del_yes"
+                            ),
+                            InlineKeyboardButton(
+                                "❌ Yo'q, bekor qilish", callback_data="baza_edit_del_no"
+                            ),
+                        ]
+                    ]
                 ),
             )
             return
-        _baza_states[uid] = f"confirm_users|||{title}|||{len(targets)}|||{'|'.join(targets)}"
+
+        # 2) Username(lar) kiritilsa — format tekshiruvidan so'ng QO'SHILADI
+        targets = [
+            t.strip().lstrip("@")
+            for t in raw.replace(",", " ").split()
+            if t.strip()
+        ]
+        valid = [t for t in targets if _is_valid_username_format(t)]
+        invalid_count = len(targets) - len(valid)
+
+        # Kiritilgan ro'yxat ichidagi takrorlarni olib tashlaymiz (katta-kichik harfdan qat'i nazar)
+        seen = set()
+        unique = []
+        for t in valid:
+            if t.lower() not in seen:
+                seen.add(t.lower())
+                unique.append(t)
+        dup_in_input = len(valid) - len(unique)
+        valid = unique
+
+        if not valid:
+            await message.reply_text(
+                "❌ Hech qanday to'g'ri username topilmadi.\n\n"
+                "Format: `@username` yoki `username` (faqat harflar, sonlar, `_`, `.`)"
+            )
+            return
+
+        _baza_states.pop(uid, None)
+        _baza_edit_add[uid] = {"gid": gid, "targets": valid}
+
+        note = ""
+        if invalid_count:
+            note += f"\n⚠️ **{invalid_count} ta** noto'g'ri formatdagi user tashlab yuborildi."
+        if dup_in_input:
+            note += f"\nℹ️ Kiritilgan ro'yxatda **{dup_in_input} ta** takror olib tashlandi."
         await message.reply_text(
-            f"📋 **{len(targets)} ta user**\n\n"
-            f"**{len(targets)} ta userni bazaga qo'shmoqchimisz?**",
+            f"➕ **Yangi user(lar) qo'shish tasdiqlashi**\n\n"
+            f"Quyidagi **{len(valid)} ta** userni bazaga qo'shmoqchimisiz?\n\n"
+            + "\n".join(f"• @{t}" for t in valid[:20])
+            + (f"\n• ...va yana {len(valid) - 20} ta" if len(valid) > 20 else "")
+            + note,
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
-                        InlineKeyboardButton("✅ Ha, tasdiqlayman!", callback_data="baza_confirm_add_yes"),
-                        InlineKeyboardButton("❌ Yo'q, adashdim!", callback_data="baza_confirm_add_no")
+                        InlineKeyboardButton(
+                            "✅ Ha, qo'shish!", callback_data="baza_edit_add_yes"
+                        ),
+                        InlineKeyboardButton(
+                            "❌ Yo'q, bekor qilish", callback_data="baza_edit_add_no"
+                        ),
                     ]
                 ]
-            )
+            ),
         )
         return
 
     raise ContinuePropagation
-
-
-def _parse_confirm_users_state(state_str: str):
-    """confirm_users|||title|||count|||targets holatini parse qiladi."""
-    if not isinstance(state_str, str) or not state_str.startswith("confirm_users"):
-        return None
-    if "|||" not in state_str:
-        return None
-    parts = state_str.split("|||")
-    if len(parts) < 4:
-        return None
-    title = parts[1]
-    try:
-        count = int(parts[2])
-    except ValueError:
-        return None
-    targets_str = parts[3]
-    targets = targets_str.split("|") if "|" in targets_str else [targets_str]
-    return {"title": title, "count": count, "targets": targets}
 
 
 async def get_user_client_or_none(uid: int):
@@ -698,149 +771,107 @@ async def get_user_client_or_none(uid: int):
         return None
 
 
-@Client.on_callback_query(filters.regex("^baza_confirm_add_yes$"))
-async def baza_confirm_add_yes_callback(client: Client, cq: CallbackQuery):
+@Client.on_callback_query(filters.regex("^baza_edit_add_yes$"))
+async def baza_edit_add_yes_callback(client: Client, cq: CallbackQuery):
     uid = cq.from_user.id
-    state = _baza_states.get(uid)
-    parsed = _parse_confirm_users_state(state)
-    if not parsed:
+    info = _baza_edit_add.pop(uid, None)
+    if not info:
         await cq.answer("Sessiya tugagan, qaytadan bosing.", show_alert=True)
         return
 
     await cq.answer()
+    gid = info["gid"]
+    targets = info["targets"]
 
-    title = parsed["title"]
-    user_list = parsed["targets"]
-
-    gid = await generate_unique_group_id()
-    await add_scraped_group(gid, title, int(time.time()), owner_id=uid)
     added = 0
+    skipped = 0
     failed = 0
-
-    user_client = await get_user_client_or_none(uid)
-    if user_client:
-        from pyrogram.errors import FloodWait
-
+    for username in targets:
         try:
-            try:
-                await cq.message.edit_text(f"🔄 0 / {len(user_list)} ta user tekshirilmoqda...\nIltimos kuting...")
-            except Exception:
-                pass
-
-            for i, username in enumerate(user_list, 1):
-                try:
-                    u = await user_client.get_users(username)
-                    await add_scraped_member(u.id, u.username, u.first_name, gid)
-                    added += 1
-                except FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
-                    try:
-                        u = await user_client.get_users(username)
-                        await add_scraped_member(u.id, u.username, u.first_name, gid)
-                        added += 1
-                    except Exception:
-                        failed += 1
-                except Exception:
-                    failed += 1
-
-                await asyncio.sleep(0.3)
-                if i % 10 == 0:
-                    try:
-                        await cq.message.edit_text(f"🔄 {i} / {len(user_list)} ta user tekshirilmoqda...\nIltimos kuting...")
-                    except Exception:
-                        pass
-                    await asyncio.sleep(2)
-        except Exception as e:
-            await cq.message.edit_text(f"❌ Xatolik: {e}")
-            _baza_states.pop(uid, None)
-            return
-    else:
-        for username in user_list:
-            try:
-                await add_scraped_member(0, username, "", gid)
+            # add_manual_member: bazada bo'lsa qo'shmaydi (False qaytaradi)
+            if await add_manual_member(gid, username):
                 added += 1
-            except Exception:
-                failed += 1
+            else:
+                skipped += 1
+        except Exception:
+            failed += 1
 
-    _baza_states.pop(uid, None)
+    result_lines = [f"✅ **Qo'shish yakunlandi!**\n", f"✔️ Qo'shildi: **{added}** ta"]
+    if skipped:
+        result_lines.append(f"⏭️ Allaqachon bazada bor: **{skipped}** ta")
+    if failed:
+        result_lines.append(f"❌ Xato: **{failed}** ta")
+
     await cq.message.edit_text(
-        f"✅ **Baza yaratildi va userlar qo'shildi!**\n\n"
-        f"📁 Baza nomi: **{title}**\n"
-        f"🆔 Baza ID: `{gid}`\n"
-        f"✅ Qo'shildi: **{added}** ta\n"
-        f"❌ Xato: **{failed}** ta",
+        "\n".join(result_lines),
         reply_markup=InlineKeyboardMarkup(
             [
-                [
-                    InlineKeyboardButton("📂 Bazani ochish", callback_data=f"baza_open_{gid}"),
-                    InlineKeyboardButton("📋 Barcha bazalar", callback_data="admin_baza")
-                ]
+                [InlineKeyboardButton("📂 Bazani ochish", callback_data=f"baza_open_{gid}")],
+                [InlineKeyboardButton("🏠 Bosh menyu", callback_data="menu_main")],
             ]
-        )
+        ),
     )
 
 
-@Client.on_callback_query(filters.regex("^baza_confirm_add_no$"))
-async def baza_confirm_add_no_callback(client: Client, cq: CallbackQuery):
+@Client.on_callback_query(filters.regex("^baza_edit_add_no$"))
+async def baza_edit_add_no_callback(client: Client, cq: CallbackQuery):
     uid = cq.from_user.id
-    state = _baza_states.get(uid)
-    parsed = _parse_confirm_users_state(state)
-    if not parsed:
-        await cq.answer("Sessiya tugagan, qaytadan bosing.", show_alert=True)
-        return
-
+    info = _baza_edit_add.pop(uid, None)
+    gid = info["gid"] if info else None
+    _baza_states.pop(uid, None)
     await cq.message.edit_text(
-        "⚠️ **Amal bekor qilinyabdi!**\n\n"
-        "Kiritgan userlaringiz yo'qolib ketadi. Tasdiqlaysizmi?",
+        "❌ **Amal bekor qilindi.**\n\nHech narsa qo'shilmadi.",
         reply_markup=InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("🗑 Tushunaman, bajarish!", callback_data="baza_cancel_confirm_yes"),
-                    InlineKeyboardButton("🔄 Davom etish", callback_data="baza_cancel_confirm_no")
-                ]
-            ]
-        )
+            (
+                [[InlineKeyboardButton("📂 Bazani ochish", callback_data=f"baza_open_{gid}")]]
+                if gid
+                else [[InlineKeyboardButton("📋 Barcha bazalar", callback_data="admin_baza")]]
+            )
+        ),
     )
     await cq.answer()
 
 
-@Client.on_callback_query(filters.regex("^baza_cancel_confirm_yes$"))
-async def baza_cancel_confirm_yes_callback(client: Client, cq: CallbackQuery):
+@Client.on_callback_query(filters.regex("^baza_edit_del_yes$"))
+async def baza_edit_del_yes_callback(client: Client, cq: CallbackQuery):
     uid = cq.from_user.id
-    _baza_states.pop(uid, None)
-    await cq.message.edit_text(
-        "❌ **Amal bekor qilindi.**\n\n"
-        "Kiritgan userlaringiz o'chirildi.",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("📋 Barcha bazalar", callback_data="admin_baza")]]
-        )
-    )
-    await cq.answer()
-
-
-@Client.on_callback_query(filters.regex("^baza_cancel_confirm_no$"))
-async def baza_cancel_confirm_no_callback(client: Client, cq: CallbackQuery):
-    uid = cq.from_user.id
-    state = _baza_states.get(uid)
-    parsed = _parse_confirm_users_state(state)
-    if not parsed:
+    info = _baza_edit_del.pop(uid, None)
+    if not info:
         await cq.answer("Sessiya tugagan, qaytadan bosing.", show_alert=True)
         return
 
-    title = parsed["title"]
-    count = parsed["count"]
+    await cq.answer()
+    gid = info["gid"]
+    display = info["display"]
 
+    deleted = await delete_scraped_member_by_row_id(gid, info["row_id"])
     await cq.message.edit_text(
-        f"📋 **{count} ta user**\n\n"
-        f"**{count} ta userni bazaga qo'shmoqchimisz?**",
+        (
+            f"🗑 **User o'chirildi!**\n\n{display} bazadan o'chirildi."
+            if deleted
+            else f"❌ **O'chirish amalga oshmadi.**\n\n{display} bazada topilmadi."
+        ),
         reply_markup=InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("✅ Ha, tasdiqlayman!", callback_data="baza_confirm_add_yes"),
-                    InlineKeyboardButton("❌ Yo'q, adashdim!", callback_data="baza_confirm_add_no")
-                ]
-            ]
-        )
+            [[InlineKeyboardButton("📂 Bazani ochish", callback_data=f"baza_open_{gid}")]]
+        ),
+    )
+
+
+@Client.on_callback_query(filters.regex("^baza_edit_del_no$"))
+async def baza_edit_del_no_callback(client: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    info = _baza_edit_del.pop(uid, None)
+    gid = info["gid"] if info else None
+    _baza_states.pop(uid, None)
+    await cq.message.edit_text(
+        "❌ **Amal bekor qilindi.**\n\nHech narsa o'chirilmadi.",
+        reply_markup=InlineKeyboardMarkup(
+            (
+                [[InlineKeyboardButton("📂 Bazani ochish", callback_data=f"baza_open_{gid}")]]
+                if gid
+                else [[InlineKeyboardButton("📋 Barcha bazalar", callback_data="admin_baza")]]
+            )
+        ),
     )
     await cq.answer()
 
