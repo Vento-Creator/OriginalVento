@@ -24,7 +24,7 @@ import time
 
 import re
 
-from config import user_states, stop_flags, pause_flags, SESSIONS_DIR, user_settings, user_custom_commands, is_owner
+from config import user_states, stop_flags, pause_flags, SESSIONS_DIR, user_settings, user_custom_commands, is_owner, can_use_owner_ux
 
 from session_manager import get_user_client
 
@@ -464,7 +464,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
     # Oddiy oqim uchun default (X-blok True qilsa — saqlanadi)
     use_random_messages = False
     owner_xcmd = None  # None | "atag" | "stop" | "pause" | "resume"
-    if is_owner(user_id) and _raw_core in ("xa", "xs", "xp", "xr", "xatag", "xstop", "xpause", "xresume"):
+    if await can_use_owner_ux(user_id) and _raw_core in ("xa", "xs", "xp", "xr", "xatag", "xstop", "xpause", "xresume"):
         owner_xcmd = {"xa": "atag", "xatag": "atag", "xs": "stop", "xstop": "stop",
                       "xp": "pause", "xpause": "pause", "xr": "resume", "xresume": "resume"}[_raw_core]
 
@@ -610,7 +610,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
                 await message.reply_text("⚠️ Hozircha hech qanday jarayon ishlamayapti.")
                 raise ContinuePropagation
         
-        if process["user_id"] != user_id and not is_owner(user_id):
+        if process["user_id"] != user_id and not await can_use_owner_ux(user_id):
             logger.info(f"[UTAG_DEBUG] stop: RETURN - process belongs to different user process_user={process['user_id']}")
             await message.reply_text("❌ Bu jarayonni faqat boshlagan foydalanuvchi to'xtatishi mumkin.")
             raise ContinuePropagation
@@ -666,7 +666,7 @@ async def custom_utag_command_handler(client: Client, message: Message):
                 await message.reply_text("⚠️ Hozircha hech qanday jarayon ishlamayapti.")
                 raise ContinuePropagation
             
-        if process["user_id"] != user_id and not is_owner(user_id):
+        if process["user_id"] != user_id and not await can_use_owner_ux(user_id):
             logger.info(f"[UTAG_DEBUG] pause/resume: RETURN - process belongs to different user process_user={process['user_id']}")
             await message.reply_text("❌ Bu jarayonni faqat boshlagan foydalanuvchi boshqara oladi.")
             raise ContinuePropagation

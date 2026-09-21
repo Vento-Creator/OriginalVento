@@ -48,6 +48,10 @@ class NameAnalyzer:
         
         if not self.male_suffixes:
             self.male_suffixes = {"bek", "jon", "boy", "mirzo", "ali", "xoja", "ovich", "evich"}
+
+        # ML klassifikator (lazy — birinchi ishlatishda o'qitiladi/yuklanadi)
+        self._ml_model = None
+        self._ml_tried = False
     
     def _load_name_database(self):
         """Load name database from external JSON file"""
@@ -75,6 +79,41 @@ class NameAnalyzer:
         except Exception as e:
             logger.warning(f"Failed to load name database: {e}")
     
+    def _rule_match(self, first_word: str) -> tuple:
+        """Eski qoida-bazasi mosligi (DB / gender-guesser / suffixlar)."""
+        if first_word in self.female_names:
+            return (True, "name_database", f"db:{first_word}")
+        if self.detector:
+            try:
+                g = self.detector.get_gender(first_word)
+                if g in self.positive_labels:
+                    return (True, "gender_guesser", g)
+                if g in ("male", "mostly_male"):
+                    return (False, "gender_guesser", g)
+            except Exception as e:
+                logger.warning(f"Gender-guesser error for name '{first_word}': {e}")
+        for suffix in self.female_suffixes:
+            if first_word.endswith(suffix):
+                return (True, "suffix_patterns", f"female:{suffix}")
+        for suffix in self.male_suffixes:
+            if first_word.endswith(suffix):
+                return (False, "male_patterns", f"male:{suffix}")
+        return (None, "no_match", "unknown")
+
+    def _get_ml_model(self):
+        """ML modelni bir marta yaratadi."""
+        if self._ml_model is None and not self._ml_tried:
+            self._ml_tried = True
+            try:
+                import os
+                from .ml import TextGenderModel
+
+                threshold = float(os.getenv("PROFILE_NAME_ML_THRESHOLD", "0.60"))
+                self._ml_model = TextGenderModel("name", threshold=threshold)
+            except Exception as e:
+                logger.debug("ML name model yaratilmadi: %s", e)
+        return self._ml_model
+
     def normalize_name(self, name: Optional[str]) -> Optional[str]:
         """Normalize name for analysis with improved transliteration handling
         
@@ -115,7 +154,7 @@ class NameAnalyzer:
         return name
     
     def analyze(self, first_name: Optional[str]) -> AnalyzerResult:
-        """Analyze a first name and return gender signal
+        """Ism tahlili (ML asosiy + qoida-bazasi zaxira).
         
         Args:
             first_name: User's first name from Telegram profile
@@ -131,6 +170,33 @@ class NameAnalyzer:
                 analyzer_name="name",
                 details={"reason": "empty_or_invalid_name"}
             )
+
+        # ML MODEL — asosiy qaror (sklearn klassifikator, ehtimollik bilan)
+        try:
+            ml_model = self._get_ml_model()
+            if ml_model is not None:
+                first_w = normalized_name.split()[0]
+                rule_hit, rule_method, rule_info = self._rule_match(first_w)
+                # If rule explicitly identified male or name contains digits, do not return female signal
+                if rule_hit is not False and not re.search(r'\d', first_w):
+                    ml_prob = ml_model.predict_female_prob(first_w)
+                    if ml_prob >= float(getattr(ml_model, "threshold", 0.60)) and rule_hit is not None:
+                        return AnalyzerResult(
+                            signal=1,
+                            analyzer_name="name",
+                            details={
+                                "name": first_w,
+                                "method": "ml_classifier",
+                                "ml_female_prob": round(ml_prob, 3),
+                                "rule_match": rule_hit,
+                                "rule_method": rule_method,
+                                "rule_info": rule_info,
+                            }
+                        )
+        except Exception as e:
+            logger.debug("ML name inferens xatosi: %s", e)
+
+        # Eski qoida-bazasi (ML past bo'lsa yoki yo'q bo'lsa — kompatibilitet)
         
         # Extract first word (handle multi-word names)
         first_word = normalized_name.split()[0]

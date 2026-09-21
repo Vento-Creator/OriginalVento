@@ -27,6 +27,7 @@ class PhotoHashCache:
         """
         self.cache_dir = Path(cache_dir)
         self.ttl = ttl
+        self.max_memory_entries = 500
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._memory_cache: Dict[str, Dict[str, Any]] = {}
         self._lock = asyncio.Lock()
@@ -39,16 +40,17 @@ class PhotoHashCache:
         """Check if cache entry is expired"""
         return time.time() - entry.get("timestamp", 0) > self.ttl
     
+    def _evict_oldest_memory_entries(self):
+        """Evict oldest memory entries if capacity reached"""
+        while len(self._memory_cache) > self.max_memory_entries:
+            try:
+                oldest_key = next(iter(self._memory_cache))
+                del self._memory_cache[oldest_key]
+            except Exception:
+                break
+
     async def get(self, image_hash: str, model_version: str = "v1") -> Optional[Dict[str, Any]]:
-        """Get cached photo analysis result
-        
-        Args:
-            image_hash: SHA-256 hash of the image
-            model_version: Model version to check compatibility
-            
-        Returns:
-            Cached analysis result or None if not found/expired
-        """
+        """Get cached photo analysis result"""
         async with self._lock:
             # Check memory cache first
             if image_hash in self._memory_cache:
@@ -66,7 +68,8 @@ class PhotoHashCache:
                         entry = json.load(f)
                     
                     if not self._is_expired(entry) and entry.get("model_version") == model_version:
-                        # Populate memory cache
+                        # Populate memory cache with eviction check
+                        self._evict_oldest_memory_entries()
                         self._memory_cache[image_hash] = entry
                         return entry["data"]
                     else:
@@ -78,13 +81,7 @@ class PhotoHashCache:
             return None
     
     async def set(self, image_hash: str, data: Dict[str, Any], model_version: str = "v1"):
-        """Cache photo analysis result
-        
-        Args:
-            image_hash: SHA-256 hash of the image
-            data: Analysis result to cache
-            model_version: Model version for cache invalidation
-        """
+        """Cache photo analysis result"""
         async with self._lock:
             entry = {
                 "data": data,
@@ -92,7 +89,8 @@ class PhotoHashCache:
                 "model_version": model_version
             }
             
-            # Store in memory cache
+            # Store in memory cache with eviction check
+            self._evict_oldest_memory_entries()
             self._memory_cache[image_hash] = entry
             
             # Store in disk cache
@@ -121,14 +119,10 @@ class ProfileResultCache:
     """
     
     def __init__(self, cache_dir: str, ttl: int = 86400):
-        """Initialize profile result cache
-        
-        Args:
-            cache_dir: Directory to store cache files
-            ttl: Time-to-live for cache entries in seconds (default: 24 hours)
-        """
+        """Initialize profile result cache"""
         self.cache_dir = Path(cache_dir)
         self.ttl = ttl
+        self.max_memory_entries = 500
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._memory_cache: Dict[str, Dict[str, Any]] = {}
         self._lock = asyncio.Lock()
@@ -145,21 +139,18 @@ class ProfileResultCache:
     def _is_expired(self, entry: Dict[str, Any]) -> bool:
         """Check if cache entry is expired"""
         return time.time() - entry.get("timestamp", 0) > self.ttl
+
+    def _evict_oldest_memory_entries(self):
+        """Evict oldest memory entries if capacity reached"""
+        while len(self._memory_cache) > self.max_memory_entries:
+            try:
+                oldest_key = next(iter(self._memory_cache))
+                del self._memory_cache[oldest_key]
+            except Exception:
+                break
     
     async def get(self, user_id: int, name: str, username: str, bio: str, photo_hash: str, analyzer_version: str = "v1") -> Optional[Dict[str, Any]]:
-        """Get cached profile analysis result
-        
-        Args:
-            user_id: Telegram user ID
-            name: First name
-            username: Username
-            bio: Bio text
-            photo_hash: Hash of profile photo
-            analyzer_version: Analyzer version for compatibility check
-            
-        Returns:
-            Cached analysis result or None if not found/expired
-        """
+        """Get cached profile analysis result"""
         profile_hash = self._compute_profile_hash(user_id, name, username, bio, photo_hash)
         
         async with self._lock:
@@ -179,7 +170,8 @@ class ProfileResultCache:
                         entry = json.load(f)
                     
                     if not self._is_expired(entry) and entry.get("analyzer_version") == analyzer_version:
-                        # Populate memory cache
+                        # Populate memory cache with eviction check
+                        self._evict_oldest_memory_entries()
                         self._memory_cache[profile_hash] = entry
                         return entry["data"]
                     else:
@@ -191,17 +183,7 @@ class ProfileResultCache:
             return None
     
     async def set(self, user_id: int, name: str, username: str, bio: str, photo_hash: str, data: Dict[str, Any], analyzer_version: str = "v1"):
-        """Cache profile analysis result
-        
-        Args:
-            user_id: Telegram user ID
-            name: First name
-            username: Username
-            bio: Bio text
-            photo_hash: Hash of profile photo
-            data: Analysis result to cache
-            analyzer_version: Analyzer version for cache invalidation
-        """
+        """Cache profile analysis result"""
         profile_hash = self._compute_profile_hash(user_id, name, username, bio, photo_hash)
         
         async with self._lock:
@@ -211,7 +193,8 @@ class ProfileResultCache:
                 "analyzer_version": analyzer_version
             }
             
-            # Store in memory cache
+            # Store in memory cache with eviction check
+            self._evict_oldest_memory_entries()
             self._memory_cache[profile_hash] = entry
             
             # Store in disk cache

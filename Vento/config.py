@@ -178,6 +178,14 @@ async def can_add_admin(user_id: int) -> bool:
     """Admin qo'shish huquqini tekshirish"""
     return await has_permission(user_id, "can_add_admin")
 
+async def can_manage_scraper(user_id: int) -> bool:
+    """Scraper/Profile scoring sozlamalarini boshqarish huquqini tekshirish"""
+    return await has_permission(user_id, "can_manage_scraper")
+
+async def can_use_owner_ux(user_id: int) -> bool:
+    """Owner UX reply (.xa, .xs, .xp, .xr) komandalarini ishlatish huquqini tekshirish"""
+    return await has_permission(user_id, "can_use_owner_ux")
+
 user_states = {}
 login_data = {}
 user_clients = {}

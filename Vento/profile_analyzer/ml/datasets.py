@@ -1,0 +1,87 @@
+"""Ism/bio ML modellari uchun belgilangan (labeled) seed ma'lumotlar."""
+
+FEMALE_NAMES = [
+    "Madina", "Sevinch", "Dilafruz", "Nilufar", "Malika", "Aziza", "Zarina", "Kamola",
+    "Nigora", "Firuza", "Gavhar", "Munisa", "Sabina", "Zuhra", "Shahnoza", "Mavjuda",
+    "Mohira", "Sadiya", "Ruxshona", "Durdona", "Barno", "Gulnoza", "Rano", "Sitora",
+    "Mashhura", "Nargiza", "Nasiba", "Oydin", "Obida", "Muattar", "Maftuna", "Latofat",
+    "Kumush", "Komila", "Karomat", "Jamila", "Husnora", "Halima", "Guliston", "Gulchexra",
+    "Gulbahor", "Gulandom", "Gulshan", "Gulrux", "Guljamol", "Fotima", "Dilorom", "Dilfuza",
+    "Dilnoza", "Dilrabo", "Dilbara", "Zaynab", "Ziyoda", "Zarnigor", "Zilola", "Zinat",
+    "Zubayda", "Zulfiya", "Yulduz", "Umida", "Umidaxon", "Nurbibi", "Nurafza", "Nurida",
+    "Nuriya", "Nosiba", "Nodira", "Nazokat", "Nazira", "Nargis", "Nafisa", "Maqsuma",
+    "Matluba", "Marjona", "Marufa", "Mahbuba", "Lola", "Lutfiya", "Laylo", "Habiba",
+    "Gulzar", "Gulzara", "Gulsanam", "Gulshara", "Guljahon", "Gulsara", "Gulshoda",
+    "Gulnora", "Gulnaz", "Gulqiz", "Gulruh", "Gulhayot", "Gulira", "Shahzoda", "Shahlo",
+    "Shahrizoda", "Shirin", "Shahodat", "Shahista", "Shoira", "Sherin", "Saodat",
+    "Surayyo", "Sabohat", "Sanobar", "Sarvinoz", "Sevara", "Salima", "Saida", "Sohiba",
+    "Tanzila", "Tursunoy", "Turgunoy", "Tohira", "Umriniso", "Vasila", "Venera",
+    "Xurshida", "Xilola", "Xadicha", "Xosiyat", "Yorqinoy", "Zebo", "Zamira",
+    "Zamona", "Dilnavoz", "Dildora", "Elnora", "Elmira", "Farida", "Farzona",
+    "Gulchehra", "Hilola", "Iroda", "Jasmina", "Muborak", "Muhabbat",
+    "Munavvar", "Mushtariy", "Naima", "Nigoraxon", "Oysara", "Parizod",
+    "Rayhona", "Robiya", "Rohila", "Shodiya", "Tabassum", "Vazira", "Xayriniso",
+    "Zarifa", "Zulayho", "Ozoda", "Olma", "Nargiza", "Gulzoda", "Muxlisa",
+    "Aisha", "Fatima", "Amina", "Zahra", "Layla", "Mariam", "Nora", "Sofia", "Anna",
+    "Maria", "Elena", "Olga", "Irina", "Natasha", "Svetlana", "Ekaterina", "Yulia",
+    "Laura", "Sara", "Emma", "Olivia", "Mia", "Eva", "Aylin", "Elif", "Jasmin",
+    "Lina", "Diana", "Alina", "Karina", "Milana", "Viktoria", "Veronika", "Kristina",
+    "Grace", "Chloe", "Lucy", "Hannah", "Julia", "Alice", "Amelia", "Isabella",
+]
+
+MALE_NAMES = [
+    "Ali", "Bekzod", "Bobur", "Davron", "Doniyor", "Eldor", "Farrux", "Firdavs",
+    "Gayrat", "Hamid", "Ibrohim", "Islom", "Jasur", "Jahongir", "Kamol", "Komil",
+    "Lutfulla", "Mansur", "Mirjalol", "Murod", "Nodir", "Nurbek", "Odil", "Otabek",
+    "Oybek", "Rustam", "Ravshan", "Sanjar", "Sardor", "Shavkat", "Sherzod", "Shohruh",
+    "Sirojiddin", "Temur", "Tohir", "Ulugbek", "Umid", "Xurshid", "Yusuf", "Zafar",
+    "Zohid", "Abror", "Aziz", "Akmal", "Alisher", "Anvar", "Asror", "Axmad",
+    "Bahodir", "Baxtiyor", "Behzod", "Dilshod", "Elbek", "Ergash", "Erkin", "Farhod",
+    "Hasan", "Husan", "Ilyos", "Ismoil", "Jamshid", "Javohir", "Karim",
+    "Laziz", "Mahmud", "Mirdavron", "Muhammad", "Mustafo", "Nizomiddin", "Nosir",
+    "Olim", "Orif", "Ozod", "Qahramon", "Qudrat", "Rasul", "Ruslan", "Said",
+    "Salim", "Shahzod", "Shukrullo", "Sunnat", "Tolib", "Toxir", "Valijon", "Xasan",
+    "Yaxyobek", "Zavqiddin", "Ziyovuddin", "Abdurahmon", "Abdulla", "Ahmad", "Amir",
+    "Asadbek", "Bekmurod", "Doston", "Elshod", "Fazliddin", "Hikmat", "Ilhom",
+    "Kamron", "Mirzo", "Muzaffar", "Nemat", "Nuriddin", "Rahmat", "Rashid",
+    "Sharofiddin", "Shuhrat", "Suxrob", "Temurbek", "Xushnud", "Yodgor", "Zokir",
+    "Alibek", "Diyor", "Golib", "Sanjarbek", "Umidjon", "Otabekmirzo", "Bobomurod",
+    "John", "Michael", "David", "James", "Robert", "William", "Daniel", "Thomas",
+    "Ivan", "Sergey", "Dmitriy", "Alexey", "Andrey", "Nikolay", "Vladimir", "Pavel",
+    "Ahmet", "Mehmet", "Mustafa", "Huseyin", "Omar", "Khalid",
+    "Peter", "Marcus", "Anton", "Erik", "Lucas", "Noah", "Liam", "Ethan", "Adam",
+    "Carlos", "Diego", "Miguel", "Francesco", "Marco", "Ahmed", "Ibrahim",
+]
+
+
+# ------------------------------------------------------------------ BIO: AYOL
+FEMALE_BIOS = [
+    "qiz", "qizaloq", "ayol", "onam", "singlim", "opam", "kelin", "xonim",
+    "men qizman", "qiz bola", "uy bekasi", "farzandim bor", "2 farzandim bor",
+    "girl", "female", "woman", "lady", "queen", "princess", "miss", "mrs",
+    "mom", "mother", "sister", "daughter", "she/her", "her/hers", "girl power",
+    "девушка", "женщина", "девочка", "мама", "дочь", "сестра", "жена",
+    "👸", "👩", "💁", "💃", "🙋‍♀️", "👩‍🍳", "👩‍🎓", "👩‍💻", "🧕",
+    "19 yosh", "18 years old", "age: 22", "born 2004", "2005 yilda tug'ilgan",
+    "hijab", "muslima", "namoz o'qiyman", "moda", "go'zallik", "kosmetika",
+    "makeup", "beauty", "shopping", "flowers", "gullar", "sevgi", "baxt",
+    "anime qiz", "girls", "kelinoyim", "sog'inch", "yulduz", "oy",
+    "мама двоих детей", "ищу друзей", "люблю цветы", "кошка", "собачка",
+]
+
+# ---------------------------------------------------- BIO: AYOL EMAS / NEYTRAL
+NONFEMALE_BIOS = [
+    "erkak", "yigit", "ota", "aka", "uka", "bobom", "sportchi",
+    "men yigitman", "yigit bola", "kasalxona", "shifokor", "dasturchi",
+    "programmer", "developer", "engineer", "football", "futbol", "box", "kurash",
+    "man", "male", "guy", "boy", "father", "brother", "son", "husband",
+    "he/him", "his/him", "мужчина", "парень", "отец", "брат", "сын", "муж",
+    "💪", "⚽", "🏋️", "🎮", "🚗", "🔧", "👨‍💻", "👨‍🍳",
+    "ish", "biznes", "savdo", "kompaniya", "xizmatlar", "reklama",
+    "premium", "admin", "bot", "kanal", "loyiha", "moliya", "investitsiya",
+    "onlayn do'kon", "do'kon", "hech narsa",
+    "работа", "бизнес", "услуги", "реклама", "канал", "спорт", "финансы",
+    "avto", "taksi", "haydovchi", "quruvchi", "usta ish", "logistika",
+    "aloqa", "murojaat", "murojaat uchun", "admin bilan", "kanal uchun",
+    "bloger", "siyosat", "yangiliklar", "hamkorlik", "reklama xizmati",
+]

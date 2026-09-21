@@ -2,6 +2,7 @@
 Configuration for the profile analyzer system
 """
 import os
+from pathlib import Path
 from typing import Dict, Any, List
 import logging
 
@@ -81,7 +82,7 @@ class ProfileAnalyzerConfig:
             config.username_keywords = [k.strip() for k in username_keywords_env.split(",")]
         
         # Bio analyzer
-        config.bio_ml_enabled = os.getenv("PROFILE_BIO_ML_ENABLED", "false").lower() == "true"
+        config.bio_ml_enabled = os.getenv("PROFILE_BIO_ML_ENABLED", "true").lower() == "true"
         config.bio_model_path = os.getenv("PROFILE_BIO_MODEL_PATH", "")
         
         # Photo analyzer
@@ -101,6 +102,42 @@ class ProfileAnalyzerConfig:
         logger.info(f"Profile analyzer config loaded: enabled={config.enabled}, min_score={config.minimum_score}")
         return config
     
+    @classmethod
+    def _config_file_path(cls) -> Path:
+        try:
+            from config import DATA_DIR
+            return Path(DATA_DIR) / "profile_scoring_config.json"
+        except Exception:
+            return Path(__file__).parent / "data" / "profile_scoring_config.json"
+
+    def save(self):
+        """Save configuration to JSON file"""
+        try:
+            path = self._config_file_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            import json
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.to_dict(), f, indent=2)
+            logger.info("Saved profile analyzer config to JSON")
+        except Exception as e:
+            logger.error(f"Failed to save profile analyzer config: {e}")
+
+    @classmethod
+    def load(cls) -> 'ProfileAnalyzerConfig':
+        """Load configuration from env and overlay persistent JSON if present"""
+        config = cls.from_env()
+        path = cls._config_file_path()
+        if path.exists():
+            try:
+                import json
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                config.update_from_dict(data)
+                logger.info("Loaded profile analyzer config from persistent JSON")
+            except Exception as e:
+                logger.warning(f"Failed to read profile analyzer config JSON: {e}")
+        return config
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary"""
         return {
@@ -133,9 +170,16 @@ class ProfileAnalyzerConfig:
             self.enabled = bool(data["enabled"])
         if "minimum_score" in data:
             self.minimum_score = int(data["minimum_score"])
-        if "analyzers" in data:
+        if "analyzers" in data and isinstance(data["analyzers"], dict):
             for analyzer, enabled in data["analyzers"].items():
                 if analyzer in self.analyzers:
                     self.analyzers[analyzer] = bool(enabled)
-        # Add other fields as needed for admin UI
+        if "profile_cache_enabled" in data:
+            self.profile_cache_enabled = bool(data["profile_cache_enabled"])
+        if "photo_cache_enabled" in data:
+            self.photo_cache_enabled = bool(data["photo_cache_enabled"])
+        if "bio_ml_enabled" in data:
+            self.bio_ml_enabled = bool(data["bio_ml_enabled"])
+        if "photo_enabled" in data:
+            self.photo_enabled = bool(data["photo_enabled"])
         logger.info(f"Profile analyzer config updated from dict")

@@ -1,7 +1,8 @@
 """
-Bio analyzer - lightweight text analysis for Telegram bios
+Bio analyzer - rule-based and scikit-learn TF-IDF ML analysis for Telegram bios
 """
 import logging
+import os
 import re
 import json
 from pathlib import Path
@@ -13,10 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class BioAnalyzer:
-    """Analyzer for detecting gender signals from bio text
-    
-    Initial implementation is rule-based. ML model can be added later.
-    """
+    """Analyzer for detecting gender signals from bio text using rules and scikit-learn ML model."""
     
     def __init__(self, config: ProfileAnalyzerConfig):
         self.config = config
@@ -46,17 +44,24 @@ class BioAnalyzer:
             r"her\/hers"                     # pronouns
         ]
         
-        # ML model placeholder (can be loaded later)
-        self.ml_model = None
-        if config.bio_ml_enabled and config.bio_model_path:
-            self._load_ml_model(config.bio_model_path)
+        self._ml_model = None
+        self._ml_tried = False
+
+    def _get_ml_model(self):
+        """Lazy initialization of TextGenderModel for bio classification."""
+        if self._ml_model is None and not self._ml_tried:
+            self._ml_tried = True
+            try:
+                from .ml import TextGenderModel
+
+                threshold = float(os.getenv("PROFILE_BIO_ML_THRESHOLD", "0.60"))
+                self._ml_model = TextGenderModel("bio", threshold=threshold)
+            except Exception as e:
+                logger.debug(f"Failed to initialize bio ML model: {e}")
+        return self._ml_model
     
     def _load_database_keywords(self):
-        """Load additional keywords from name database
-        
-        Returns:
-            List of additional keywords
-        """
+        """Load additional keywords from name database."""
         try:
             data_dir = Path(__file__).parent / "data"
             data_file = data_dir / "uzbek_names.json"
@@ -65,43 +70,19 @@ class BioAnalyzer:
                 with open(data_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
-                # Extract female keywords from database
                 return data.get("female_keywords", [])
         except Exception as e:
             logger.warning(f"Failed to load database keywords: {e}")
             return []
     
-    def _load_ml_model(self, model_path: str):
-        """Load ML model for bio classification (future implementation)
-        
-        Args:
-            model_path: Path to the trained model file
-        """
-        try:
-            # Placeholder for ML model loading
-            # In future: self.ml_model = joblib.load(model_path)
-            logger.info(f"ML model loading not yet implemented for path: {model_path}")
-        except Exception as e:
-            logger.error(f"Failed to load ML model: {e}")
-    
     def normalize_bio(self, bio: Optional[str]) -> Optional[str]:
-        """Normalize bio text for analysis with improved Unicode handling
-        
-        Args:
-            bio: Raw bio text from Telegram profile
-            
-        Returns:
-            Normalized bio or None if invalid
-        """
+        """Normalize bio text for analysis with improved Unicode handling."""
         if not bio:
             return None
         
-        # Convert to lowercase for keyword matching
         bio_lower = bio.lower()
         
-        # Normalize Unicode characters (Cyrillic/Latin variants)
         try:
-            # Simple normalization: handle common Cyrillic-Latin confusion
             replacements = {
                 'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e',
                 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k',
@@ -115,13 +96,8 @@ class BioAnalyzer:
         except Exception as e:
             logger.warning(f"Unicode normalization failed: {e}")
         
-        # Remove excessive punctuation but keep basic structure
         bio_normalized = re.sub(r'[^\w\s\-\.,;:!?]', ' ', bio_lower)
-        
-        # Normalize whitespace: multiple spaces/tabs/newlines to single space
         bio_normalized = re.sub(r'\s+', ' ', bio_normalized)
-        
-        # Strip whitespace
         bio_normalized = bio_normalized.strip()
         
         if not bio_normalized:
@@ -130,14 +106,7 @@ class BioAnalyzer:
         return bio_normalized
     
     def analyze(self, bio: Optional[str]) -> AnalyzerResult:
-        """Analyze bio text and return gender signal
-        
-        Args:
-            bio: User's bio text from Telegram profile
-            
-        Returns:
-            AnalyzerResult with signal (0 or 1)
-        """
+        """Analyze bio text and return gender signal."""
         normalized_bio = self.normalize_bio(bio)
         
         if not normalized_bio:
@@ -147,7 +116,7 @@ class BioAnalyzer:
                 details={"reason": "empty_or_invalid_bio"}
             )
         
-        # Check for keyword matches
+        # 1. Check for keyword matches
         for keyword in self.keywords:
             if keyword.lower() in normalized_bio:
                 return AnalyzerResult(
@@ -160,7 +129,7 @@ class BioAnalyzer:
                     }
                 )
         
-        # Check for pattern matches
+        # 2. Check for pattern matches
         for pattern in self.patterns:
             if re.search(pattern, normalized_bio, re.IGNORECASE):
                 return AnalyzerResult(
@@ -173,16 +142,24 @@ class BioAnalyzer:
                     }
                 )
         
-        # ML model analysis (if available)
-        if self.ml_model:
-            try:
-                # Placeholder for ML inference
-                # prediction = self.ml_model.predict([normalized_bio])[0]
-                # if prediction == 1:
-                #     return AnalyzerResult(signal=1, analyzer_name="bio", details={"method": "ml_model"})
-                pass
-            except Exception as e:
-                logger.warning(f"ML model inference failed: {e}")
+        # 3. ML model analysis (TF-IDF + Logistic Regression)
+        try:
+            ml_model = self._get_ml_model()
+            if ml_model is not None:
+                ml_prob = ml_model.predict_female_prob(normalized_bio)
+                threshold = float(getattr(ml_model, "threshold", 0.60))
+                if ml_prob >= threshold:
+                    return AnalyzerResult(
+                        signal=1,
+                        analyzer_name="bio",
+                        details={
+                            "method": "ml_classifier",
+                            "ml_female_prob": round(ml_prob, 3),
+                            "bio_length": len(normalized_bio)
+                        }
+                    )
+        except Exception as e:
+            logger.debug(f"Bio ML model inference failed: {e}")
         
         # No match found
         return AnalyzerResult(

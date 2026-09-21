@@ -113,6 +113,14 @@ class ProfileAnalyzer:
         username = user.username or ""
         bio = user.bio or ""
         
+        # Download photo if photo analyzer is enabled and photo bytes not provided
+        if profile_photo_bytes is None and client and self.config.analyzers.get("photo", True) and self.config.photo_enabled:
+            try:
+                profile_photo_bytes = await self.download_profile_photo(client, user.id)
+            except Exception as e:
+                logger.warning(f"Failed to download profile photo for user {user.id}: {e}")
+                profile_photo_bytes = None
+
         # Compute photo hash if photo bytes provided
         photo_hash = ""
         if profile_photo_bytes:
@@ -170,53 +178,31 @@ class ProfileAnalyzer:
         if self.config.analyzers.get("photo", True) and self.config.photo_enabled:
             try:
                 async with self.photo_semaphore:
-                    # Check photo cache first
+                    cached_photo_result = None
                     if self.photo_cache and photo_hash:
                         cached_photo_result = await self.photo_cache.get(photo_hash, self.config.photo_model_version)
-                        if cached_photo_result:
-                            logger.debug(f"Photo cache hit for user {user.id}")
-                            signals["photo"] = cached_photo_result.get("signal", 0)
-                            details["photo_analysis"] = cached_photo_result.get("details", {})
-                        else:
-                            # Download photo if not provided
-                            if profile_photo_bytes is None:
-                                profile_photo_bytes = await self.download_profile_photo(client, user.id)
-                                if profile_photo_bytes:
-                                    photo_hash = self.photo_analyzer.compute_image_hash(profile_photo_bytes)
-                            
-                            # Analyze photo
-                            if profile_photo_bytes:
-                                photo_result = await self.photo_analyzer.analyze(profile_photo_bytes)
-                                signals["photo"] = photo_result.signal
-                                details["photo_analysis"] = photo_result.details
-                                
-                                # Cache photo result
-                                if self.photo_cache:
-                                    await self.photo_cache.set(
-                                        photo_hash,
-                                        {
-                                            "signal": photo_result.signal,
-                                            "details": photo_result.details
-                                        },
-                                        self.config.photo_model_version
-                                    )
-                            else:
-                                signals["photo"] = 0
-                                details["photo_analysis"] = {"reason": "no_photo"}
-                    else:
-                        # No cache, analyze directly
-                        if profile_photo_bytes is None:
-                            profile_photo_bytes = await self.download_profile_photo(client, user.id)
-                            if profile_photo_bytes:
-                                photo_hash = self.photo_analyzer.compute_image_hash(profile_photo_bytes)
+                    
+                    if cached_photo_result:
+                        logger.debug(f"Photo cache hit for user {user.id}")
+                        signals["photo"] = cached_photo_result.get("signal", 0)
+                        details["photo_analysis"] = cached_photo_result.get("details", {})
+                    elif profile_photo_bytes:
+                        photo_result = await self.photo_analyzer.analyze(profile_photo_bytes)
+                        signals["photo"] = photo_result.signal
+                        details["photo_analysis"] = photo_result.details
                         
-                        if profile_photo_bytes:
-                            photo_result = await self.photo_analyzer.analyze(profile_photo_bytes)
-                            signals["photo"] = photo_result.signal
-                            details["photo_analysis"] = photo_result.details
-                        else:
-                            signals["photo"] = 0
-                            details["photo_analysis"] = {"reason": "no_photo"}
+                        if self.photo_cache and photo_hash:
+                            await self.photo_cache.set(
+                                photo_hash,
+                                {
+                                    "signal": photo_result.signal,
+                                    "details": photo_result.details
+                                },
+                                self.config.photo_model_version
+                            )
+                    else:
+                        signals["photo"] = 0
+                        details["photo_analysis"] = {"reason": "no_photo"}
             except Exception as e:
                 logger.warning(f"Photo analyzer failed for user {user.id}: {e}")
                 signals["photo"] = 0

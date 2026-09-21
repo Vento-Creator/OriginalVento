@@ -1,196 +1,164 @@
 """
-Photo analyzer - lightweight profile photo analysis with memory optimization
+Photo analyzer - OpenCV DNN Face Detection + HuggingFace ViT Gender Classification
 """
 import logging
 import hashlib
 import asyncio
+import io
 from typing import Optional, Dict, Any
 from PIL import Image
-import io
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 class PhotoAnalyzer:
-    """Analyzer for profile photos with memory-efficient processing
-    
-    This is a placeholder implementation. The actual computer vision model
-    will be added after benchmarking in Phase 7-8.
-    """
+    """Analyzer for profile photos using OpenCV DNN face detection and ViT gender classification."""
     
     def __init__(self, config):
         self.config = config
-        self.model = None
         self.model_version = config.photo_model_version
         self.max_resolution = config.photo_max_resolution
         self.cache_enabled = config.photo_cache_enabled
         self.safe_mode = config.photo_max_memory_safe_mode
         
-        # Placeholder for model loading
-        if config.photo_model_path:
-            self._load_model(config.photo_model_path)
-    
-    def _load_model(self, model_path: str):
-        """Load computer vision model (future implementation)
-        
-        Args:
-            model_path: Path to the model file
-        """
-        try:
-            # Placeholder for model loading
-            # After benchmarking, this will load the selected lightweight model
-            logger.info(f"Photo model loading not yet implemented for path: {model_path}")
-        except Exception as e:
-            logger.error(f"Failed to load photo model: {e}")
-    
+        self._face_detector = None
+        self._gender_classifier = None
+        self._ml_init_attempted = False
+
+    def _get_ml_models(self):
+        """Lazy initialization of FaceDetector and GenderClassifier."""
+        if not self._ml_init_attempted:
+            self._ml_init_attempted = True
+            try:
+                from .ml import FaceDetector, GenderClassifier
+                self._face_detector = FaceDetector()
+                self._gender_classifier = GenderClassifier()
+            except Exception as e:
+                logger.warning(f"Failed to initialize photo ML models: {e}")
+        return self._face_detector, self._gender_classifier
+
     def compute_image_hash(self, image_bytes: bytes) -> str:
-        """Compute SHA-256 hash of image bytes for caching
-        
-        Args:
-            image_bytes: Raw image bytes
-            
-        Returns:
-            Hexadecimal hash string
-        """
+        """Compute SHA-256 hash of image bytes for caching."""
         return hashlib.sha256(image_bytes).hexdigest()
-    
-    def preprocess_image(self, image_bytes: bytes) -> Optional[Image.Image]:
-        """Preprocess image for analysis with memory optimization
-        
-        This method:
-        1. Loads the image
-        2. Resizes to target resolution
-        3. Converts to RGB
-        4. Releases original image buffer
-        
-        Args:
-            image_bytes: Raw image bytes
-            
-        Returns:
-            Preprocessed PIL Image or None if processing fails
-        """
+
+    def analyze_photo_bytes(self, photo_bytes: bytes) -> Dict[str, Any]:
+        """Perform Computer Vision face detection and gender classification on photo bytes."""
         try:
-            # Load image from bytes
-            image = Image.open(io.BytesIO(image_bytes))
+            face_det, gender_clf = self._get_ml_models()
             
-            # Convert to RGB if necessary
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
+            # Decode image bytes to OpenCV BGR matrix
+            nparr = np.frombuffer(photo_bytes, np.uint8)
+            bgr_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
-            # Resize to target resolution for memory efficiency
-            if image.size[0] > self.max_resolution or image.size[1] > self.max_resolution:
-                image.thumbnail((self.max_resolution, self.max_resolution), Image.LANCZOS)
+            if bgr_img is None or bgr_img.size == 0:
+                return {"ok": False, "reason": "image_decode_failed"}
+
+            h, w = bgr_img.shape[:2]
             
-            return image
+            # Resize large images to conserve memory
+            if max(h, w) > 1600:
+                scale = 1600 / max(h, w)
+                bgr_img = cv2.resize(bgr_img, None, fx=scale, fy=scale)
+                h, w = bgr_img.shape[:2]
+
+            # 1. Detect faces
+            faces = face_det.detect(bgr_img, max_faces=5) if face_det else []
             
+            if not faces:
+                return {
+                    "ok": True,
+                    "face_detected": False,
+                    "face_count": 0,
+                    "female_prob": 0.0,
+                    "gender_label": "no_face",
+                    "method": "ml_cv_detector"
+                }
+
+            # Top face (highest confidence)
+            primary_face = faces[0]
+            expanded_box = primary_face.expand(w, h, pad=0.25)
+            
+            # Crop face area
+            face_crop = bgr_img[expanded_box.y1:expanded_box.y2, expanded_box.x1:expanded_box.x2]
+            
+            if face_crop.size == 0:
+                return {
+                    "ok": True,
+                    "face_detected": True,
+                    "face_count": len(faces),
+                    "female_prob": 0.0,
+                    "gender_label": "invalid_crop",
+                    "method": "ml_cv_detector"
+                }
+
+            # 2. Classify gender from face crop
+            if gender_clf:
+                clf_result = gender_clf.classify_face(face_crop)
+                female_prob = clf_result.get("female_prob", 0.0)
+                gender_label = clf_result.get("label", "unknown")
+                is_female = female_prob >= 0.5
+            else:
+                female_prob = 0.0
+                gender_label = "model_unavailable"
+                is_female = False
+
+            return {
+                "ok": True,
+                "face_detected": True,
+                "face_count": len(faces),
+                "face_confidence": round(float(primary_face.confidence), 3),
+                "female_prob": round(float(female_prob), 3),
+                "gender_label": gender_label,
+                "is_female": is_female,
+                "method": "ml_cv_vit"
+            }
+
         except Exception as e:
-            logger.warning(f"Image preprocessing failed: {e}")
-            return None
-    
-    def extract_basic_features(self, image: Image.Image) -> Dict[str, Any]:
-        """Extract basic visual features without ML model
-        
-        Args:
-            image: Preprocessed PIL Image
-            
-        Returns:
-            Dictionary of basic features
-        """
-        features = {
-            "width": image.size[0],
-            "height": image.size[1],
-            "aspect_ratio": image.size[0] / image.size[1] if image.size[1] > 0 else 0,
-            "mode": image.mode
-        }
-        
-        # Basic heuristic: portrait orientation (height > width)
-        features["portrait_like"] = image.size[1] > image.size[0]
-        
-        # Basic heuristic: square images might be logos/illustrations
-        aspect_diff = abs(image.size[0] - image.size[1]) / max(image.size)
-        features["likely_portrait"] = aspect_diff > 0.2
-        
-        return features
-    
-    def analyze_with_model(self, image: Image.Image) -> Dict[str, Any]:
-        """Analyze image with ML model (placeholder)
-        
-        Args:
-            image: Preprocessed PIL Image
-            
-        Returns:
-            Model analysis results
-        """
-        # Placeholder for actual model inference
-        # After benchmarking, this will use the selected lightweight model
-        return {
-            "face_detected": False,
-            "person_detected": False,
-            "confidence": 0.0,
-            "method": "placeholder"
-        }
-    
+            logger.warning(f"Photo ML inference failed: {e}")
+            return {"ok": False, "reason": str(e)}
+
     async def analyze(self, photo_bytes: Optional[bytes]) -> 'AnalyzerResult':
-        """Analyze profile photo and return gender signal
-        
-        Args:
-            photo_bytes: Raw profile photo bytes from Telegram
-            
-        Returns:
-            AnalyzerResult with signal (0 or 1)
-        """
+        """Analyze profile photo and return gender signal."""
         from .models import AnalyzerResult
-        
+
         if not photo_bytes:
             return AnalyzerResult(
                 signal=0,
                 analyzer_name="photo",
                 details={"reason": "no_photo"}
             )
-        
+
         try:
-            # Compute hash for caching
             image_hash = self.compute_image_hash(photo_bytes)
             
-            # Preprocess image with memory optimization
-            image = self.preprocess_image(photo_bytes)
-            if not image:
+            # Check memory pressure in safe mode
+            if self.check_memory_pressure():
+                logger.warning("Memory pressure high (>85%), skipping photo ML analysis")
                 return AnalyzerResult(
                     signal=0,
                     analyzer_name="photo",
-                    details={"reason": "preprocessing_failed", "hash": image_hash}
+                    details={"reason": "memory_pressure_skip", "hash": image_hash}
                 )
+
+            ml_res = self.analyze_photo_bytes(photo_bytes)
             
-            # Extract basic features
-            basic_features = self.extract_basic_features(image)
-            
-            # If model is available, run inference
-            if self.model:
-                model_features = self.analyze_with_model(image)
-                features = {**basic_features, **model_features}
-            else:
-                features = basic_features
-                features["method"] = "basic_features_only"
-            
-            # Release image memory immediately
-            image.close()
-            
-            # Basic heuristic: if portrait-like and reasonable aspect ratio, give signal
-            # This is a very basic fallback when model is not available
             signal = 0
-            if features.get("portrait_like") and features.get("likely_portrait"):
-                signal = 1
-            
+            if ml_res.get("ok"):
+                if ml_res.get("face_detected") and ml_res.get("female_prob", 0.0) >= 0.5:
+                    signal = 1
+
             return AnalyzerResult(
                 signal=signal,
                 analyzer_name="photo",
                 details={
-                    **features,
+                    **ml_res,
                     "hash": image_hash,
                     "model_version": self.model_version
                 }
             )
-            
+
         except Exception as e:
             logger.warning(f"Photo analysis failed: {e}")
             return AnalyzerResult(
@@ -198,19 +166,14 @@ class PhotoAnalyzer:
                 analyzer_name="photo",
                 details={"reason": "analysis_failed", "error": str(e)}
             )
-    
+
     def check_memory_pressure(self) -> bool:
-        """Check if system is under memory pressure (future implementation)
-        
-        Returns:
-            True if memory pressure is high and analysis should be skipped
-        """
+        """Check if system is under memory pressure (>85% RSS)."""
         if not self.safe_mode:
             return False
-        
+
         try:
             import psutil
-            memory_percent = psutil.virtual_memory().percent
-            return memory_percent > 85  # 85% memory usage threshold
+            return psutil.virtual_memory().percent > 85
         except Exception:
             return False
