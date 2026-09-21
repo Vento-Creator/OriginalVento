@@ -20,6 +20,7 @@ except ImportError:
 
 
 def _status_emoji(enabled: bool) -> str:
+    """Return emoji based on enabled status"""
     return "✅" if enabled else "❌"
 
 
@@ -73,39 +74,47 @@ def _profile_scoring_keyboard(config) -> InlineKeyboardMarkup:
     )])
     
     # Back button
-    rows.append([InlineKeyboardButton("🔙 Orqaga", callback_data="menu_main")])
+    rows.append([InlineKeyboardButton("🔙 Back", callback_data="menu_main")])
     
     return InlineKeyboardMarkup(rows)
 
 
 def _profile_scoring_text(config) -> str:
     """Generate text for profile scoring settings"""
-    text = "🧠 **Profile Scoring Sozlamalari**\n\n"
-    text += f"**Holat:** {'Yoqilgan' if config.enabled else 'O\'chirilgan'}\n"
-    text += f"**Minimum Score:** {config.minimum_score}/{sum(1 for v in config.analyzers.values() if v)}\n\n"
-    text += "Bu tizim profil ma'lumotlarini tahlil qilib,\n"
-    text += "har bir analyzer uchun signal (0 yoki 1) beradi.\n"
-    text += "Jami score minimum_score dan yuqori bo'lsa,\n"
-    text += "foydalanuvchi bazaga qo'shiladi.\n\n"
-    text += "⚠️ Bu hech qachon 100% aniq emas,\n"
-    text += "faqat heuristic signal hisoblanadi."
+    text = "🧠 **Profile Scoring Settings**\n\n"
+    
+    if config.enabled:
+        text += f"**Status:** Enabled\n"
+    else:
+        text += f"**Status:** Disabled\n"
+    
+    enabled_analyzers = sum(1 for v in config.analyzers.values() if v)
+    text += f"**Minimum Score:** {config.minimum_score}/{enabled_analyzers}\n\n"
+    
+    text += "This system analyzes profile information and assigns\n"
+    text += "a signal (0 or 1) for each analyzer.\n"
+    text += "If the total score exceeds the minimum score,\n"
+    text += "the user is added to the database.\n\n"
+    text += "⚠️ This is never 100% accurate,\n"
+    text += "it is only a heuristic signal."
+    
     return text
 
 
 @Client.on_message(filters.private & filters.text, group=-8)
 async def profile_scoring_menu_command(client: Client, message: Message):
-    """Profile scoring settings menu command"""
+    """Handle profile scoring settings menu command"""
     if not message.from_user or (message.text or "").strip() != PROFILE_SCORING_BTN:
         from pyrogram import ContinuePropagation
         raise ContinuePropagation
     
     if not is_admin(message.from_user.id):
-        await message.reply_text("⛔️ Faqat adminlar uchun")
+        await message.reply_text("⛔️ Admins only")
         from pyrogram import StopPropagation
         raise StopPropagation
     
     if not PROFILE_ANALYZER_AVAILABLE:
-        await message.reply_text("⚠️ Profile analyzer tizimi o'rnatilmagan")
+        await message.reply_text("⚠️ Profile analyzer system not installed")
         from pyrogram import StopPropagation
         raise StopPropagation
     
@@ -122,11 +131,11 @@ async def profile_scoring_menu_command(client: Client, message: Message):
 async def profile_scoring_callback(client: Client, callback_query: CallbackQuery):
     """Handle profile scoring settings callbacks"""
     if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("⛔️ Faqat adminlar uchun", show_alert=True)
+        await callback_query.answer("⛔️ Admins only", show_alert=True)
         return
     
     if not PROFILE_ANALYZER_AVAILABLE:
-        await callback_query.answer("⚠️ Profile analyzer tizimi o'rnatilmagan", show_alert=True)
+        await callback_query.answer("⚠️ Profile analyzer system not installed", show_alert=True)
         return
     
     action = callback_query.data.split("|")[1]
@@ -136,7 +145,8 @@ async def profile_scoring_callback(client: Client, callback_query: CallbackQuery
     
     if action == "toggle_main":
         config.enabled = not config.enabled
-        await callback_query.answer(f"Profile scoring {'yoqildi' if config.enabled else 'o\'chirildi'}")
+        status = "enabled" if config.enabled else "disabled"
+        await callback_query.answer(f"Profile scoring {status}")
     
     elif action == "adjust_min_score":
         # Simple increment/decrement for minimum score
@@ -145,34 +155,40 @@ async def profile_scoring_callback(client: Client, callback_query: CallbackQuery
     
     elif action == "toggle_name":
         config.analyzers["name"] = not config.analyzers.get("name", True)
-        await callback_query.answer(f"Name analyzer {'yoqildi' if config.analyzers['name'] else 'o\'chirildi'}")
+        status = "enabled" if config.analyzers['name'] else "disabled"
+        await callback_query.answer(f"Name analyzer {status}")
     
     elif action == "toggle_username":
         config.analyzers["username"] = not config.analyzers.get("username", True)
-        await callback_query.answer(f"Username analyzer {'yoqildi' if config.analyzers['username'] else 'o\'chirildi'}")
+        status = "enabled" if config.analyzers['username'] else "disabled"
+        await callback_query.answer(f"Username analyzer {status}")
     
     elif action == "toggle_bio":
         config.analyzers["bio"] = not config.analyzers.get("bio", True)
-        await callback_query.answer(f"Bio analyzer {'yoqildi' if config.analyzers['bio'] else 'o\'chirildi'}")
+        status = "enabled" if config.analyzers['bio'] else "disabled"
+        await callback_query.answer(f"Bio analyzer {status}")
     
     elif action == "toggle_photo":
         config.analyzers["photo"] = not config.analyzers.get("photo", True)
-        await callback_query.answer(f"Photo analyzer {'yoqildi' if config.analyzers['photo'] else 'o\'chirildi'}")
+        status = "enabled" if config.analyzers['photo'] else "disabled"
+        await callback_query.answer(f"Photo analyzer {status}")
     
     elif action == "toggle_profile_cache":
         config.profile_cache_enabled = not config.profile_cache_enabled
-        await callback_query.answer(f"Profile cache {'yoqildi' if config.profile_cache_enabled else 'o\'chirildi'}")
+        status = "enabled" if config.profile_cache_enabled else "disabled"
+        await callback_query.answer(f"Profile cache {status}")
     
     elif action == "toggle_photo_cache":
         config.photo_cache_enabled = not config.photo_cache_enabled
-        await callback_query.answer(f"Photo cache {'yoqildi' if config.photo_cache_enabled else 'o\'chirildi'}")
+        status = "enabled" if config.photo_cache_enabled else "disabled"
+        await callback_query.answer(f"Photo cache {status}")
     
     elif action == "dummy":
         await callback_query.answer()
         return
     
     else:
-        await callback_query.answer("Noma'lum amal")
+        await callback_query.answer("Unknown action")
         return
     
     # Update UI

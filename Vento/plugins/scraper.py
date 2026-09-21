@@ -76,6 +76,7 @@ def parse_group_identifier(text: str) -> str:
     return text
 
 def is_likely_girl(first_name: str) -> bool:
+    """Check if a name is likely female using multiple heuristics."""
     if not first_name:
         return False
     
@@ -86,45 +87,45 @@ def is_likely_girl(first_name: str) -> bool:
         
     first_word = words[0]
     
-    # 1. O'zbek qiz ismlari ro'yxatini tekshirish
+    # 1. Check Uzbek female name list
     if first_word in GIRL_NAMES:
         return True
         
-    # 2. O'zbek ayol suffixlari
+    # 2. Check Uzbek female suffixes
     female_suffixes = ("xon", "bonu", "niso", "bibi", "begim", "oy", "goy")
     if first_word.endswith(female_suffixes):
         return True
         
-    # 3. AI/ML model bilan ism bo'yicha jinsni aniqlash
+    # 3. Use AI/ML model for gender detection
     try:
         detected_gender = d.get_gender(first_word)
-        # 'female' yoki 'mostly_female' bo'lsa qiz deb hisoblaymiz
+        # Consider 'female' or 'mostly_female' as female
         if detected_gender in ('female', 'mostly_female'):
             return True
-        # 'male' yoki 'mostly_male' bo'lsa erkak deb hisoblaymiz
+        # Consider 'male' or 'mostly_male' as male
         if detected_gender in ('male', 'mostly_male'):
             return False
     except:
         pass
         
-    # 4. O'zbek ayol prefikslari
+    # 4. Check Uzbek female prefixes
     if first_word.startswith(("gul", "moh", "oy")):
         return True
         
-    # 5. Rus ayol suffixlari
+    # 5. Check Russian female suffixes
     if first_word.endswith(("ova", "eva", "ina", "aya", "skaya")):
         return True
         
-    # 6. Erkak suffixlari (aniq ravishda erkak bo'lsa)
+    # 6. Check male suffixes (definitely male if present)
     male_suffixes = ("bek", "jon", "boy", "mirzo", "ali", "xoja", "xuja", "iddin", "ulla", "ovich", "evich")
     if first_word.endswith(male_suffixes):
         return False
         
-    # 7. Agar model 'andy' (ambiguous) qaytarsa, qo'shimcha tekshirish
+    # 7. If model returns 'andy' (ambiguous), do additional checks
     try:
         detected_gender = d.get_gender(first_word)
         if detected_gender == 'andy':
-            # Qo'shimcha o'zbek qoidalarini tekshiramiz
+            # Additional Uzbek rules
             if first_word.startswith(("gul", "moh", "oy", "nur")):
                 return True
     except:
@@ -150,33 +151,33 @@ SCRAPER_TYPE_ERROR_TEXT = (
 
 
 def friendly_scrape_error(e: Exception) -> str:
-    """Texnik Telegram xatolarini tushunarli o'zbekcha xabarga aylantiradi."""
+    """Convert technical Telegram errors to user-friendly messages."""
     s = str(e).upper()
     if "CHAT_ADMIN_REQUIRED" in s or "ADMIN_REQUIRED" in s:
         return (
-            "Bu chatda a'zolar ro'yxati yopiq (kanal). "
-            "Kanaldan yig'ish uchun admin bo'lishingiz kerak, yoki a'zolari "
-            "ko'rinadigan ochiq guruh havolasini yuboring."
+            "This chat has a private member list (channel). "
+            "You need to be an admin to scrape from channels, or send "
+            "an invite link to a group with visible members."
         )
     if "CHANNEL_PRIVATE" in s or "CHAT_FORBIDDEN" in s:
-        return "Guruh/kanal topilmadi yoki kirish uchun ruxsat yo'q."
+        return "Group/channel not found or access denied."
     if "USER_NOT_PARTICIPANT" in s:
-        return "Avval ushbu guruh/kanalga a'zo bo'lishingiz kerak."
+        return "You need to join this group/channel first."
     if "FLOOD" in s:
-        return "Telegram vaqtincha chekladi (FloodWait). Biroz kutib qayta urinib ko'ring."
+        return "Telegram rate limit (FloodWait). Please wait and try again."
     if "AUTH_KEY" in s or "SESSION" in s or "UNAUTHORIZED" in s:
         return f"{e}"
-    return f"Xatolik: {e}"
+    return f"Error: {e}"
 
 
 async def check_scrape_target(user_client: Client, chat, user_id: int):
-    """Scraper maqsadi guruh/kanal ekanini va ruxsat borligini tekshiradi.
+    """Check if the scrape target is a valid group/channel and if user has permissions.
 
-    Xato bo'lsa foydalanuvchiga ko'rsatiladigan xabar matnini qaytaradi,
-    hammasi joyida bo'lsa None qaytaradi.
+    Returns error message for user if something is wrong,
+    None if everything is okay.
     """
     if chat.type == ChatType.CHANNEL:
-        # Kanal: a'zolar ro'yxati faqat adminlarga ko'rinadi
+        # Channel: member list only visible to admins
         try:
             me = await user_client.get_chat_member(chat.id, user_id)
             if me.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
@@ -185,8 +186,8 @@ async def check_scrape_target(user_client: Client, chat, user_id: int):
             return SCRAPER_TYPE_ERROR_TEXT
     elif chat.type in (ChatType.PRIVATE, ChatType.BOT):
         return (
-            "❌ Scraper faqat **guruh** yoki **kanal** uchun ishlaydi.\n"
-            "Guruh havolasini yuboring: `@guruh_username`"
+            "❌ Scraper only works for **groups** or **channels**.\n"
+            "Send a group invite link: `@group_username`"
         )
     return None
 
@@ -259,17 +260,17 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
 
             if count % 50 == 0:
                 bar, pct = make_progress_bar(count, chat.members_count or count + 100)
-                status_text = f"⚡ **Odatiy scrape...**\n\n"
-                status_text += f"👥 Yig'ildi: **{count}** ta\n"
+                status_text = f"⚡ **Fast scrape...**\n\n"
+                status_text += f"👥 Collected: **{count}**\n"
                 if use_profile_scoring and filtered_count > 0:
-                    status_text += f"� Filtrlangan: **{filtered_count}** ta\n"
+                    status_text += f"🔍 Filtered: **{filtered_count}**\n"
                 status_text += f"[{bar}] {pct}%"
                 
                 try:
                     await status_msg.edit_text(
                         status_text,
                         reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🛑 To'xtatish", callback_data=f"stop_scraper_{stop_key}")]
+                            [InlineKeyboardButton("🛑 Stop", callback_data=f"stop_scraper_{stop_key}")]
                         ])
                     )
                 except:
@@ -279,24 +280,24 @@ async def execute_fast_scrape(user_id: int, target: int, status_msg: Message, cl
 
         stop_flags.pop(stop_key, None)
         
-        # Activity tracking - scraper statistikasini yozib qo'yish
+        # Activity tracking - log scraper statistics
         try:
             from database import record_scraper_activity
             await record_scraper_activity(user_id, count)
         except Exception as e:
-            logger.error(f"Scraper activity tracking xatosi: {e}")
+            logger.error(f"Scraper activity tracking error: {e}")
         
-        action_text = f"Scraper (Tezkor) ishlatdi: {count} ta a'zo yig'ildi"
+        action_text = f"Scraper (fast) executed: {count} members collected"
         if use_profile_scoring:
-            action_text += f", {filtered_count} ta filtrlandi"
+            action_text += f", {filtered_count} filtered"
         await log_user_action(user_id, action_text)
 
-        result_text = f"✅ **Muvaffaqiyatli yig'ildi!**\n\n"
-        result_text += f"🏷 Guruh: **{chat.title}**\n"
-        result_text += f"👥 Yig'ilgan: **{count}** ta\n"
+        result_text = f"✅ **Successfully collected!**\n\n"
+        result_text += f"🏷 Group: **{chat.title}**\n"
+        result_text += f"👥 Collected: **{count}**\n"
         if use_profile_scoring and filtered_count > 0:
-            result_text += f"🔍 Filtrlangan: **{filtered_count}** ta\n"
-        result_text += f"🗂 Baza ID: `{group_id}`"
+            result_text += f"🔍 Filtered: **{filtered_count}**\n"
+        result_text += f"🗂 Database ID: `{group_id}`"
 
         await status_msg.edit_text(
             result_text,
@@ -552,10 +553,10 @@ async def scrape_fast_callback(client: Client, callback_query: CallbackQuery):
     async def scraper_callback(data):
         """Queue processor tomonidan chaqiriladigan callback"""
         from config import bot_client
-        status_text = "⚡ **Odatiy scrape boshlandi...**\n\n"
+        status_text = "⚡ **Fast scrape starting...**\n\n"
         if use_profile_scoring:
-            status_text += "🧠 Profile scoring yoqilgan\n"
-        status_text += "🔄 A'zolar yig'ilmoqda...\n[░░░░░░░░░░] 0%"
+            status_text += "🧠 Profile scoring enabled\n"
+        status_text += "🔄 Collecting members...\n[░░░░░░░░░░] 0%"
         
         msg = await bot_client.send_message(
             user_id,
@@ -595,10 +596,10 @@ async def scrape_fast_callback(client: Client, callback_query: CallbackQuery):
     stop_key = f"scraper_{user_id}_{int(time.time())}"
     stop_flags[stop_key] = False
 
-    status_text = "⚡ **Odatiy scrape boshlandi...**\n\n"
+    status_text = "⚡ **Fast scrape starting...**\n\n"
     if use_profile_scoring:
-        status_text += "🧠 Profile scoring yoqilgan\n"
-    status_text += "🔄 A'zolar yig'ilmoqda...\n[░░░░░░░░░░] 0%"
+        status_text += "🧠 Profile scoring enabled\n"
+    status_text += "🔄 Collecting members...\n[░░░░░░░░░░] 0%"
 
     msg = await callback_query.message.edit_text(
         status_text,
