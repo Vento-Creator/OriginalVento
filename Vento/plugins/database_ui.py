@@ -1462,8 +1462,17 @@ async def run_adder_task(bot_client: Client, message: Message, uid: int, gid: st
     if not target_chat:
         await message.reply_text("❌ Guruh ma'lumotlarini olib bo'lmadi.")
         return
+
+    from pyrogram.enums import ChatType
+    from pyrogram.errors import UserAlreadyParticipant
+
+    is_channel = (target_chat.type == ChatType.CHANNEL)
+    channel_note = "\n\n⚠️ **Eslatma:** Kanallarga Telegram ko'pi bilan 200 ta a'zo taklif qilishga ruxsat beradi." if is_channel else ""
         
-    status_msg = await message.reply_text(f"✅ Guruh topildi: **{target_chat.title}**.\n⏳ Odam qo'shish boshlanmoqda...")
+    status_msg = await message.reply_text(
+        f"✅ Nishon topildi: **{target_chat.title}** ({'Kanal' if is_channel else 'Guruh'}).\n"
+        f"⏳ Odam qo'shish boshlanmoqda...{channel_note}"
+    )
     
     from database import update_last_nakrutka_time
     await update_last_nakrutka_time(uid, int(time.time()))
@@ -1480,12 +1489,14 @@ async def run_adder_task(bot_client: Client, message: Message, uid: int, gid: st
             await user_client.add_chat_members(target_chat.id, [m["user_id"]])
             added += 1
             await asyncio.sleep(2) # Anti-flood delay
+        except UserAlreadyParticipant:
+            added += 1
         except FloodWait as e:
             await asyncio.sleep(e.value + 1)
             try:
                 await user_client.add_chat_members(target_chat.id, [m["user_id"]])
                 added += 1
-            except:
+            except Exception:
                 failed += 1
         except PeerFlood:
             await message.reply_text("⛔️ Telegram akkauntingiz ko'p odam qo'shgani uchun cheklov oldi (PeerFlood). Jarayon to'xtatildi.")
@@ -1509,7 +1520,7 @@ async def run_adder_task(bot_client: Client, message: Message, uid: int, gid: st
     await message.reply_text(
         f"🏁 **Nakrutka yakunlandi!**\n\n"
         f"📁 Baza ID: `{gid}`\n"
-        f"🎯 Nishon: `{target_chat.title}`\n\n"
+        f"🎯 Nishon: `{target_chat.title}` ({'Kanal' if is_channel else 'Guruh'})\n\n"
         f"✅ Qo'shildi: **{added}** ta\n"
         f"❌ Xato/Maxfiylik: **{failed}** ta"
     )
