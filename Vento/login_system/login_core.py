@@ -121,15 +121,23 @@ class PhoneValidator:
 
     @staticmethod
     def normalize_phone(phone: str) -> str:
-        """Normalize common human-entered phone formats to E.164-style ``+digits``."""
+        """Normalize human-entered phone formats (with spaces, dashes, brackets) to E.164-style ``+digits``."""
         raw = str(phone or "").strip()
+        has_plus = raw.startswith("+") or raw.startswith("00")
         digits_only = "".join(c for c in raw if c.isdigit())
-        if digits_only.startswith("00"):
+        if raw.startswith("00"):
             digits_only = digits_only[2:]
-        # If 9 digits starting with 9, default to Uzbekistan (+998)
-        if len(digits_only) == 9 and digits_only.startswith("9"):
-            digits_only = "998" + digits_only
-        return f"+{digits_only}" if digits_only else ""
+
+        if not has_plus:
+            # 1. 9 digits starting with 9 -> Uzbekistan local number (+998901234567)
+            if len(digits_only) == 9 and digits_only.startswith("9"):
+                digits_only = "998" + digits_only
+                has_plus = True
+            # 2. 12 digits starting with 998 -> Uzbekistan number typed without + (+998901234567)
+            elif len(digits_only) == 12 and digits_only.startswith("998"):
+                has_plus = True
+
+        return f"+{digits_only}" if has_plus else digits_only
 
     @staticmethod
     def validate(phone: str) -> Tuple[bool, str]:
@@ -139,7 +147,7 @@ class PhoneValidator:
         Returns:
             (is_valid, error_message)
         """
-        phone = phone.strip()
+        phone = str(phone or "").strip()
         
         # Normalize first
         try:
@@ -147,9 +155,13 @@ class PhoneValidator:
         except Exception:
             return False, "Telefon raqamini qayta ishlashda xatolik"
         
-        # Basic format validation: must start with + followed by digits
+        # Check if country code + is missing for non-Uzbek numbers
         if not phone.startswith("+"):
-            return False, "Telefon raqami + bilan boshlanishi kerak (Masalan: +998901234567, +79001234567, +14155552671)"
+            return False, (
+                "❌ **Davlat kodi kiritilmadi!**\n\n"
+                "Xalqaro raqamlarni davlat kodi (+) bilan kiriting (Masalan: `+79001234567`, `+14155552671`, `+905001234567`).\n"
+                "O'zbekiston raqamlari uchun 9 ta raqam (masalan `901234567`) yoki `+998...` kiriting."
+            )
         
         if not phone[1:].isdigit():
             return False, "Telefon raqami faqat raqamlardan iborat bo'lishi kerak"
@@ -162,7 +174,7 @@ class PhoneValidator:
         # Length validation: E.164 numbers are 10-15 digits total (excluding +)
         digit_count = len(phone[1:])
         if digit_count < 10 or digit_count > 15:
-            return False, f"Telefon raqami uzunligi noto'g'ri (hozir {digit_count} ta raqam, 10-15 ta bo'lishi kerak)"
+            return False, f"❌ Telefon raqami uzunligi noto'g'ri (hozir {digit_count} ta raqam, 10-15 ta bo'lishi kerak)"
         
         # Try to validate with phonenumbers library if available
         try:
