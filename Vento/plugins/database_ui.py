@@ -870,14 +870,16 @@ async def baza_state_handler(client: Client, message: Message):
         raise ContinuePropagation
 
     if state == "waiting_baza_search_id":
-        gid = message.text.strip().upper()
-        group = await get_group_info(gid)
-        if group and group.get("owner_id") != uid and not _is_admin(uid):
-            group = None
+        query = message.text.strip()
         user_states.pop(uid, None)
-        if not group:
+        
+        from database import search_groups
+        owner_filter = None if is_admin(uid) else uid
+        results = await search_groups(query, limit=20, owner_id=owner_filter)
+
+        if not results:
             await message.reply_text(
-                f"❌ `{gid}` ID li baza topilmadi.",
+                f"❌ **'{query}'** bo'yicha hech qanday baza topilmadi.",
                 reply_markup=InlineKeyboardMarkup(
                     [
                         [
@@ -893,14 +895,16 @@ async def baza_state_handler(client: Client, message: Message):
                     ]
                 ),
             )
-        else:
+            return
+
+        if len(results) == 1:
+            g = results[0]
+            gid = g["group_id"]
             cnt = await get_group_member_count(gid)
-            date_str = datetime.fromtimestamp(group["date_scraped"]).strftime(
-                "%d.%m.%Y %H:%M"
-            )
+            date_str = datetime.fromtimestamp(g["date_scraped"]).strftime("%d.%m.%Y %H:%M")
             await message.reply_text(
                 f"✅ **Baza topildi!**\n\n"
-                f"📁 {group['group_title']}\n"
+                f"📁 **{g['group_title']}**\n"
                 f"🆔 `{gid}` · 👥 {cnt} ta · 📅 {date_str}",
                 reply_markup=InlineKeyboardMarkup(
                     [
@@ -917,6 +921,18 @@ async def baza_state_handler(client: Client, message: Message):
                     ]
                 ),
             )
+        else:
+            lines = [f"🔍 **'{query}' bo'yicha topilgan bazalar ({len(results)} ta):**\n"]
+            buttons = []
+            for g in results:
+                gid = g["group_id"]
+                cnt = await get_group_member_count(gid)
+                lines.append(f"📁 **{g['group_title']}** (🆔 `{gid}`, 👥 {cnt} ta)")
+                buttons.append([InlineKeyboardButton(f"📂 {g['group_title']} ({cnt} ta)", callback_data=f"baza_open_{gid}")])
+            buttons.append([InlineKeyboardButton("🔍 Qayta qidirish", callback_data="baza_search_id")])
+            buttons.append([InlineKeyboardButton("📋 Barcha bazalar", callback_data="admin_baza")])
+            
+            await message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     if state == "waiting_baza_clear_id":

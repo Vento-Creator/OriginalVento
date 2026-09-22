@@ -712,18 +712,26 @@ async def get_all_scraped_groups(owner_id=None):
                 rows = await cursor.fetchall()
         return [{"group_id": r[0], "group_title": r[1], "date_scraped": r[2], "owner_id": r[3]} for r in rows]
 
-async def search_groups(query: str, limit: int = 20):
-    """Guruhlarni nomi bo'yicha qidirish (ILIKE case-insensitive)"""
+async def search_groups(query: str, limit: int = 20, owner_id: int = None):
+    """Guruhlarni ID yoki nomi bo'yicha qidirish (ILIKE case-insensitive)"""
     async with get_db_connection() as db:
-        search_pattern = f"%{query}%"
-        async with db.execute(
-            """SELECT group_id, group_title, date_scraped, owner_id 
-               FROM scraped_groups 
-               WHERE group_title ILIKE $1
-               ORDER BY date_scraped DESC 
-               LIMIT $2""",
-            (search_pattern, limit)
-        ) as cursor:
+        pattern = f"%{query.strip()}%"
+        if owner_id is not None:
+            sql = """SELECT group_id, group_title, date_scraped, owner_id 
+                     FROM scraped_groups 
+                     WHERE (group_id = ? OR group_title ILIKE ?) AND owner_id = ?
+                     ORDER BY date_scraped DESC 
+                     LIMIT ?"""
+            params = (query.strip().upper(), pattern, owner_id, limit)
+        else:
+            sql = """SELECT group_id, group_title, date_scraped, owner_id 
+                     FROM scraped_groups 
+                     WHERE group_id = ? OR group_title ILIKE ?
+                     ORDER BY date_scraped DESC 
+                     LIMIT ?"""
+            params = (query.strip().upper(), pattern, limit)
+            
+        async with db.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
             return [{"group_id": r[0], "group_title": r[1], "date_scraped": r[2], "owner_id": r[3]} for r in rows]
 
