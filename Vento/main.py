@@ -101,6 +101,7 @@ async def register_bot_commands():
     """
     default_commands = [
         BotCommand("start", "Botni ishga tushirish / menyuni ochish"),
+        BotCommand("giveaway", "Konkurs yaratish va boshqarish"),
         BotCommand("atag", "Guruh a'zolarini tegish (utag jarayoni)"),
         BotCommand("taymer", "Taymer o'rnatish: /taymer <soniya> <xabar>"),
         BotCommand("cancel", "Faol taymerni bekor qilish"),
@@ -110,6 +111,7 @@ async def register_bot_commands():
     ]
     private_commands = [
         BotCommand("start", "Botni ishga tushirish / menyuni ochish"),
+        BotCommand("giveaway", "Konkurs yaratish va boshqarish"),
         BotCommand("admin", "Admin panelini ochish (faqat adminlar uchun)"),
         BotCommand("atag", "Guruh a'zolarini tegish (utag jarayoni)"),
         BotCommand("taymer", "Taymer o'rnatish: /taymer <soniya> <xabar>"),

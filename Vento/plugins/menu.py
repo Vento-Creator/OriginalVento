@@ -51,7 +51,7 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
         rows = [
             [KeyboardButton("🔍 Scraper"),   KeyboardButton("🗂 Bazalar")],
             [KeyboardButton("📨 Mass DM"),   KeyboardButton("🏷 Utag")],
-            [KeyboardButton("💬 Chatlar"),   KeyboardButton("🔍 Guruh qidirish")],
+            [KeyboardButton("💬 Chatlar"),   KeyboardButton("🔍 Guruh qidirish"), KeyboardButton("🎁 Konkurs")],
         ]
         if adm:
             # Check if profile analyzer is available
@@ -117,7 +117,7 @@ _MENU_TEXTS = {
     "⭐️ Obuna", "⭐️ Obuna sotib olish", "⭐️ Obuna haqida",
     "👤 Akkaunt", "🛠 Admin Panel", "📱 Akkaunt ulash", "🔙 Bosh menyu",
     "📣 Yangiliklar", "📞 Bog'lanish", "💬 Chatlar", "🌐 Til",
-    "⚙️ Funksiyalar", "👥 Takliflar",
+    "⚙️ Funksiyalar", "👥 Takliflar", "🎁 Konkurs",
 }
 
 @Client.on_message(filters.private & filters.text, group=-10)
