@@ -116,7 +116,7 @@ def _format_time(ts) -> str:
     if not ts:
         return "—"
     try:
-        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+        return datetime.fromtimestamp(ts).strftime("%d-%m-%Y %H:%M")
     except Exception:
         return "—"
 
@@ -127,12 +127,56 @@ def _parse_time(text: str):
         return None
     if t in ("now", "hozir", "endi"):
         return _now()
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M"):
+    for fmt in ("%d-%m-%Y %H:%M", "%d.%m.%Y %H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(t, fmt).timestamp()
         except ValueError:
             continue
     return None
+
+
+def _build_channel_active_description(c: dict) -> str:
+    prize = c.get("prize", "—")
+    start_str = _format_time(c.get("start_at") or c.get("created_at") or _now())
+    end_str = _format_time(c.get("end_at"))
+    return (
+        "Konkurs davom etmoqda!\n"
+        f"Yutuq: {prize}\n"
+        f"Boshlangan sana: {start_str}\n"
+        f"Tugash sana: {end_str}\n"
+        "Hammaga omad tilaymiz!"
+    )
+
+
+def _build_channel_ended_description(c: dict) -> str:
+    prize = c.get("prize", "—")
+    end_str = _format_time(c.get("end_at") or _now())
+    return (
+        "Konkurs tugadi!\n"
+        f"Yutuq: {prize}\n"
+        f"Tugagan sana: {end_str}\n"
+        "Qatnashgan va faollik ko'rsatgan hammaga tashakkur!"
+    )
+
+
+async def _update_channel_description(c: dict, is_ended: bool = False):
+    channel_id = c.get("channel_id")
+    if not channel_id:
+        return
+    try:
+        from session_manager import get_user_client
+        uc = await get_user_client(c["creator_id"])
+        if not uc:
+            return
+        desc = _build_channel_ended_description(c) if is_ended else _build_channel_active_description(c)
+        await uc.set_chat_description(channel_id, desc)
+        try:
+            await uc.set_chat_title(channel_id, DEFAULT_CHANNEL_TITLE)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning("[GIVEAWAY] Kanal description yangilashda xatolik #%s: %s", c.get("id"), e)
+
 
 
 def _format_duration(seconds: float) -> str:
@@ -596,15 +640,12 @@ async def _ensure_channel(c: dict):
     uc = await get_user_client(c["creator_id"])
 
     try:
-        channel_title = f"🎁 {c['name']}"
-        if len(channel_title) > 128:
-            channel_title = channel_title[:125] + "..."
         chat = await uc.create_channel(
-            channel_title,
-            description=f"Vento Konkurs | Sovrin: {c.get('prize', '')}",
+            DEFAULT_CHANNEL_TITLE,
+            description=_build_channel_active_description(c),
         )
         c["channel_id"] = chat.id
-        c["channel_title"] = chat.title
+        c["channel_title"] = DEFAULT_CHANNEL_TITLE
         try:
             link = await uc.export_chat_invite_link(chat.id)
             c["channel_link"] = link
@@ -649,9 +690,17 @@ async def _use_existing_channel(c: dict, link_or_username: str):
     else:
         chat = await uc.get_chat(target)
     c["channel_id"] = chat.id
-    c["channel_title"] = chat.title
+    c["channel_title"] = DEFAULT_CHANNEL_TITLE
     c["channel_link"] = target
     await _clear_channel(uc, chat.id)
+    try:
+        await uc.set_chat_title(chat.id, DEFAULT_CHANNEL_TITLE)
+    except Exception as e:
+        logger.warning("[GIVEAWAY] Title o'zgartirishda xatolik: %s", e)
+    try:
+        await uc.set_chat_description(chat.id, _build_channel_active_description(c))
+    except Exception as e:
+        logger.warning("[GIVEAWAY] Description o'zgartirishda xatolik: %s", e)
     _save()
     return chat.id, target
 
@@ -1058,6 +1107,12 @@ async def _finish_contest(c: dict):
 
     c["status"] = "ended"
     _save()
+
+    try:
+        await _update_channel_description(c, is_ended=True)
+    except Exception as e:
+        logger.warning("[GIVEAWAY] Kanal description yakunlashda update xatolik: %s", e)
+
     return winner
 
 
