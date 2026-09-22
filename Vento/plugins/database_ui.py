@@ -228,42 +228,15 @@ async def baza_search_id_callback(client: Client, cq: CallbackQuery):
         await cq.answer("⛔️ Ruxsat yo'q!", show_alert=True)
         return
 
-    groups = await get_all_scraped_groups()
-    if not groups:
-        await cq.answer("Baza bo'sh!", show_alert=True)
-        return
-
     user_states[uid] = "waiting_baza_search_id"
 
-    lines = ["🔍 **Baza qidirish / Ochish**\n", "Mavjud bazalar:\n"]
-    buttons = []
-
-    for g in groups:
-        cnt = await get_group_member_count(g["group_id"])
-        date_str = datetime.fromtimestamp(g["date_scraped"]).strftime("%d.%m.%Y %H:%M")
-        lines.append(
-            f"📁 **Guruh nomi:** {g['group_title']}\n"
-            f"👥 **Yig'ilgan userlari:** {cnt} ta\n"
-            f"📅 **Oxirgi yig'ilgan sana:** {date_str}\n"
-            f"🆔 **ID:** `{g['group_id']}`\n"
-        )
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    f"📁 {g['group_title']} ({cnt} ta)",
-                    callback_data=f"baza_open_{g['group_id']}",
-                )
-            ]
-        )
-
-    lines.append("Bazalardan birini tanlang yoki 4 xonali ID sini kiriting:")
-
-    buttons.append(
-        [InlineKeyboardButton("❌ Bekor qilish", callback_data="admin_baza")]
-    )
-
     await cq.message.edit_text(
-        "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons)
+        "🔍 **Baza qidirish**\n\n"
+        "Qaysi guruhni qidirmoqchisiz?\n"
+        "Guruh **nomi** (masalan `Kino`) yoki **ID** sini (masalan `AB12`) yuboring:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Orqaga", callback_data="admin_baza")]
+        ])
     )
     await cq.answer()
 
