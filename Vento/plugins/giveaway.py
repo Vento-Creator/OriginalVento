@@ -567,6 +567,13 @@ async def _ensure_channel(c: dict):
         return chat.id, c["channel_link"]
     except Exception as e:
         logger.exception("[GIVEAWAY] Kanal yaratishda xatolik: %s", e)
+        err_str = str(e).upper()
+        if "CHANNELS_ADMIN" in err_str or "LIMIT" in err_str or "TOO_MUCH" in err_str:
+            raise ValueError(
+                "Akkauntingizda Telegram kanallari ochish **limiti tugagan!**\n\n"
+                "💡 **Nima qilish kerak:** Boshqaruv panelidan **'🔗 Kanal ulash'** tugmasini bosing va "
+                "oldin ochilgan kanalingiz linkini yuborib ulang."
+            )
         raise ValueError(f"Kanal yaratib bo'lmadi: {e}")
 
 
