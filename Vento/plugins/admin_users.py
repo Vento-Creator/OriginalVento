@@ -597,7 +597,7 @@ async def admin_user_dbs_callback(client: Client, cq: CallbackQuery):
         date_str = _fmt_ts(g["date_scraped"])
         lines.append(f"📁 **{g['group_title']}** — {cnt} ta · {date_str} · `{g['group_id']}`")
         buttons.append([
-            InlineKeyboardButton(f"📋 {g['group_title'][:20]}", callback_data=f"adm_db_list_{g['group_id']}_0"),
+            InlineKeyboardButton(f"📂 {g['group_title'][:24]} ({cnt} ta)", callback_data=f"baza_open_{g['group_id']}"),
             InlineKeyboardButton("🗑", callback_data=f"adm_db_del_{g['group_id']}_{target_id}"),
         ])
 
@@ -673,7 +673,7 @@ async def admin_db_del_callback(client: Client, cq: CallbackQuery):
         cnt = await get_group_member_count(g["group_id"])
         lines.append(f"📁 **{g['group_title']}** — {cnt} ta · `{g['group_id']}`")
         buttons.append([
-            InlineKeyboardButton(f"📋 {g['group_title'][:20]}", callback_data=f"adm_db_list_{g['group_id']}_0"),
+            InlineKeyboardButton(f"📂 {g['group_title'][:24]} ({cnt} ta)", callback_data=f"baza_open_{g['group_id']}"),
             InlineKeyboardButton("🗑", callback_data=f"adm_db_del_{g['group_id']}_{target_id}"),
         ])
     buttons.append([InlineKeyboardButton("🔙 Profil", callback_data=f"adm_user_{target_id}")])
