@@ -363,9 +363,14 @@ async def wizard_confirm_cb(client: Client, cq: CallbackQuery):
     _contests[str(cid)] = c
     _save()
 
+    # Konkurs yaratildi — kanal tanlovi ko'rsatiladi
     await cq.message.edit_text(
-        "🎁 **Konkurs yaratildi!**\n\n" + _build_contest_card(c),
-        reply_markup=_build_panel_keyboard(cid),
+        "🎁 **Konkurs yaratildi!**\n\n" + _build_contest_card(c) +
+        "\n\n📢 **Konkurs kanali kerak.** Qanday qilishni tanlang:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Avtomatik kanal yaratish", callback_data=f"gw_ch_auto_{cid}")],
+            [InlineKeyboardButton("🔗 O'z kanalimni ulash", callback_data=f"gw_channel_{cid}")],
+        ]),
     )
     await cq.answer("✅ Konkurs yaratildi")
     logger.info("[GIVEAWAY] Contest #%s created by %s (type=%s)", cid, uid, c["ctype"])
@@ -538,6 +543,46 @@ async def giveaway_group_cmd(client: Client, message: Message):
         reply_markup=kb,
     )
 
+
+@Client.on_callback_query(filters.regex("^gw_ch_auto_(\\d+)$"))
+async def gw_ch_auto_cb(client: Client, cq: CallbackQuery):
+    """Avtomatik kanal yaratish tugmasi bosilganda."""
+    cid = cq.matches[0].group(1)
+    c = _get_contest(cid)
+    if not c:
+        await cq.answer("❌ Konkurs topilmadi", show_alert=True)
+        return
+    if c.get("channel_id"):
+        await cq.answer("Kanal allaqachon ulangan", show_alert=True)
+        await cq.message.edit_text(
+            "🎁 **Konkurs boshqaruvi**\n\n" + _build_contest_card(c),
+            reply_markup=_build_panel_keyboard(cid),
+        )
+        return
+    await cq.answer("⏳ Kanal yaratilmoqda...")
+    try:
+        ch_id, ch_link = await _ensure_channel(c)
+        await cq.message.edit_text(
+            f"✅ **Kanal yaratildi!**\n\n📢 {ch_link}\n\n" + _build_contest_card(c),
+            reply_markup=_build_panel_keyboard(cid),
+        )
+    except ValueError as e:
+        await cq.message.edit_text(
+            f"❌ {e}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 O'z kanalimni ulash", callback_data=f"gw_channel_{cid}")],
+                [InlineKeyboardButton("📜 Boshqaruv paneli", callback_data=f"gw_panel_{cid}")],
+            ]),
+        )
+    except Exception as e:
+        await cq.message.edit_text(
+            f"❌ Kanal yaratib bo'lmadi: {e}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 O'z kanalimni ulash", callback_data=f"gw_channel_{cid}")],
+                [InlineKeyboardButton("📜 Boshqaruv paneli", callback_data=f"gw_panel_{cid}")],
+            ]),
+        )
+
 # ---------------------------------------------------------------------------
 # Kanal yaratish / tozalash / ulash
 # ---------------------------------------------------------------------------
@@ -553,7 +598,7 @@ async def _ensure_channel(c: dict):
     try:
         chat = await uc.create_channel(
             DEFAULT_CHANNEL_TITLE,
-            about=f"🎁 Konkurs: {c['name']}",
+            description=f"🎁 Konkurs: {c['name']}",
         )
         c["channel_id"] = chat.id
         c["channel_title"] = chat.title
@@ -707,7 +752,11 @@ async def _add_participant(c: dict, user, bot_username: str = None) -> dict:
     c.setdefault("participants", {})[str(seq)] = p
 
     if not c.get("channel_id"):
-        await _ensure_channel(c)
+        raise ValueError(
+            "❌ Kanal hali ulanmagan!\n\n"
+            "Avval boshqaruv panelida **'📢 Avtomatik kanal yaratish'** yoki "
+            "**'🔗 O'z kanalimni ulash'** tugmasini bosing."
+        )
 
     if c["ctype"] == "battle":
         await _post_battle_participant(uc, c, seq, p)
