@@ -63,6 +63,7 @@ _PENDING_ADD = {}
 _PENDING_TMPL = {}
 _PENDING_CHANNEL = {}
 _PENDING_DEL = {}
+_PENDING_GW_FORCE_SUB = {}
 
 
 def _now() -> float:
@@ -176,6 +177,71 @@ async def _update_channel_description(c: dict, is_ended: bool = False):
             pass
     except Exception as e:
         logger.warning("[GIVEAWAY] Kanal description yangilashda xatolik #%s: %s", c.get("id"), e)
+
+
+def _format_user_mention(user) -> str:
+    if not user:
+        return "Foydalanuvchi"
+    username = getattr(user, "username", None)
+    if username:
+        return f"@{username}"
+    first_name = getattr(user, "first_name", None) or getattr(user, "title", None) or "Foydalanuvchi"
+    user_id = getattr(user, "id", None)
+    if user_id:
+        return f"[{first_name}](tg://user?id={user_id})"
+    return first_name
+
+
+def _build_subscription_warning_text(user) -> str:
+    mention = _format_user_mention(user)
+    return (
+        f"Assalomu alaykum Hurmatli {mention}!\n"
+        "Yozish uchun yoki ovoz berish uchun oldin kanalga obuna boling va "
+        "konkurs tugamaguncha uni tark etmang(aks holda sizning ovozingiz hisobga olinmaydi)!!!"
+    )
+
+
+async def _is_subscribed_to_channel(client, user_id: int, channel_ref: str) -> bool:
+    if not channel_ref or not user_id:
+        return True
+    try:
+        ref = channel_ref.strip()
+        if ref.startswith("https://t.me/"):
+            ref = ref.rstrip("/").split("/")[-1]
+            if not ref.startswith("+") and not ref.startswith("@"):
+                ref = "@" + ref
+        elif not ref.startswith("-100") and not ref.startswith("@") and not ref.startswith("+"):
+            ref = "@" + ref
+
+        member = await client.get_chat_member(ref, user_id)
+        status = getattr(member, "status", None)
+        status_str = str(status).lower()
+        if any(s in status_str for s in ("creator", "owner", "admin", "member", "restricted")):
+            return True
+        return False
+    except Exception as e:
+        logger.debug("[GIVEAWAY] Subscription check error for %s / user %s: %s", channel_ref, user_id, e)
+        return True
+
+
+async def _get_unsubscribed_channels(client, user_id: int, c: dict = None) -> list[str]:
+    """Admin doimiy majburiy kanali va konkurs kanallarini tekshiradi."""
+    from feature_flags import get_bot_setting
+    unsubbed = []
+    global_ch = await get_bot_setting("gw_force_channel", "")
+    if global_ch:
+        is_sub = await _is_subscribed_to_channel(client, user_id, global_ch)
+        if not is_sub:
+            unsubbed.append(global_ch)
+
+    if c and c.get("force_channels"):
+        for ch in c["force_channels"]:
+            if ch != global_ch:
+                is_sub = await _is_subscribed_to_channel(client, user_id, ch)
+                if not is_sub:
+                    unsubbed.append(ch)
+
+    return unsubbed
 
 
 
@@ -1244,6 +1310,8 @@ def _reaction_counts(message):
 
 async def _count_comments(uc, channel_id: int, message_id: int, me_id: int) -> int:
     """Ishtirokchi postiga yozilgan UNIKAL kommenterlar soni (discussion replies orqali)."""
+    from feature_flags import get_bot_setting
+    global_ch = await get_bot_setting("gw_force_channel", "")
     unique = set()
     try:
         async for m in uc.get_discussion_replies(channel_id, message_id):
@@ -1253,6 +1321,9 @@ async def _count_comments(uc, channel_id: int, message_id: int, me_id: int) -> i
                 continue
             if me_id and m.from_user.id == me_id:
                 continue
+            if global_ch:
+                if not await _is_subscribed_to_channel(uc, m.from_user.id, global_ch):
+                    continue
             unique.add(m.from_user.id)
     except Exception as e:
         logger.debug("[GIVEAWAY] komment hisoblashda xatolik #%s/%s: %s", channel_id, message_id, e)
@@ -1364,7 +1435,28 @@ async def giveaway_payload_start(client: Client, message: Message):
 
 async def _process_vote(client: Client, message: Message, contest_id, seq: int):
     """ODDIY konkursda ovoz berish."""
+    voter = message.from_user
+    c = _get_contest(contest_id)
 
+    if c:
+        unsubbed = await _get_unsubscribed_channels(client, voter.id if voter else None, c)
+        if unsubbed:
+            warning_text = _build_subscription_warning_text(voter)
+            buttons = []
+            for ch in unsubbed:
+                link = ch if ch.startswith("http") else f"https://t.me/{ch.lstrip('@')}"
+                buttons.append([InlineKeyboardButton("📢 Kanalga a'zo bo'lish", url=link)])
+            buttons.append([InlineKeyboardButton("🔄 Qayta tekshirish", callback_data=f"gw_recheck_{contest_id}_{seq}")])
+            try:
+                await message.reply_text(warning_text, reply_markup=InlineKeyboardMarkup(buttons))
+            except Exception:
+                pass
+            return
+
+    await _execute_vote(client, voter, message, contest_id, seq)
+
+
+async def _execute_vote(client: Client, voter, message: Message, contest_id, seq: int):
     async def _reply(text):
         try:
             await message.reply_text(text)
@@ -1390,7 +1482,7 @@ async def _process_vote(client: Client, message: Message, contest_id, seq: int):
         await _reply("⏰ Konkurs **tugagan**.")
         return
 
-    voter_id = message.from_user.id
+    voter_id = voter.id if voter else None
     target = c.get("participants", {}).get(str(seq))
     if not target:
         await _reply("❌ Bunday ishtirokchi topilmadi.")
@@ -1426,6 +1518,124 @@ async def _process_vote(client: Client, message: Message, contest_id, seq: int):
         f"Jami ovozlar: **{target['votes']}** ta"
     )
     logger.info("[GIVEAWAY] Vote #%s user=%s -> participant=%s", contest_id, voter_id, seq)
+
+
+@Client.on_callback_query(filters.regex("^gw_recheck_(\\d+)_(\\d+)$"))
+async def gw_recheck_vote_cb(client: Client, cq: CallbackQuery):
+    cid = cq.matches[0].group(1)
+    seq = int(cq.matches[0].group(2))
+    c = _get_contest(cid)
+    if not c:
+        await cq.answer("❌ Konkurs topilmadi", show_alert=True)
+        return
+
+    unsubbed = await _get_unsubscribed_channels(client, cq.from_user.id, c)
+    if unsubbed:
+        await cq.answer(
+            "❌ Siz hali majburiy kanal(lar)ga a'zo bo'lmadingiz! Obuna bo'lib qayta urinib ko'ring.",
+            show_alert=True,
+        )
+        return
+
+    await cq.answer("✅ Obuna tasdiqlandi!")
+    await _execute_vote(client, cq.from_user, cq.message, cid, seq)
+
+
+# ---------------------------------------------------------------------------
+# Admin — Konkurs majburiy obuna kanali boshqaruvi
+# ---------------------------------------------------------------------------
+
+@Client.on_callback_query(filters.regex("^admin_gw_force_sub$"))
+async def admin_gw_force_sub_cb(client: Client, cq: CallbackQuery):
+    if not is_bot_admin(cq.from_user.id):
+        await cq.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+    from feature_flags import get_bot_setting
+    cur = await get_bot_setting("gw_force_channel", "")
+    status_text = f"📢 **Joriy kanal:** `{cur}`" if cur else "❌ **Joriy kanal:** O'rnatilmagan"
+    text = (
+        "🎁 **Konkurs majburiy obuna kanali sozlamalari**\n\n"
+        "Ushbu kanal barcha konkurslarda (battllarda ham, oddiy ovozli konkurslarda ham) "
+        "doimiy majburiy obuna kanali hisoblanadi va foydalanuvchilar uni olib tashlay olmaydi.\n\n"
+        f"{status_text}"
+    )
+    buttons = [
+        [InlineKeyboardButton("✏️ Kanalni o'zgartirish / o'rnatish", callback_data="admin_gw_force_sub_set")],
+    ]
+    if cur:
+        buttons.append([InlineKeyboardButton("🗑 Kanalni o'chirish", callback_data="admin_gw_force_sub_del")])
+    buttons.append([InlineKeyboardButton("🔙 Orqaga", callback_data="menu_admin")])
+
+    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^admin_gw_force_sub_set$"))
+async def admin_gw_force_sub_set_cb(client: Client, cq: CallbackQuery):
+    if not is_bot_admin(cq.from_user.id):
+        await cq.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+    _PENDING_GW_FORCE_SUB[cq.from_user.id] = True
+    await cq.message.edit_text(
+        "✏️ **Konkurs majburiy obuna kanalini kiriting**\n\n"
+        "Kanal linki yoki username'ini yuboring:\n"
+        "Masalan: `@mychannel` yoki `https://t.me/mychannel`",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("❌ Bekor qilish", callback_data="admin_gw_force_sub")
+        ]]),
+    )
+    await cq.answer()
+
+
+@Client.on_callback_query(filters.regex("^admin_gw_force_sub_del$"))
+async def admin_gw_force_sub_del_cb(client: Client, cq: CallbackQuery):
+    if not is_bot_admin(cq.from_user.id):
+        await cq.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+    from feature_flags import set_bot_setting
+    await set_bot_setting("gw_force_channel", "")
+    await cq.answer("🗑 Majburiy kanal o'chirildi", show_alert=True)
+    await admin_gw_force_sub_cb(client, cq)
+
+
+@Client.on_message(filters.private & filters.text, group=-5)
+async def admin_gw_force_sub_input(client: Client, message: Message):
+    uid = message.from_user.id
+    if not _PENDING_GW_FORCE_SUB.pop(uid, None):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.reply_text("❌ Kanal kiritilmadi.")
+        return
+    from feature_flags import set_bot_setting
+    await set_bot_setting("gw_force_channel", text)
+    await message.reply_text(
+        f"✅ **Konkurs majburiy obuna kanali saqlandi:** `{text}`",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🎁 Sozlamalarga qaytish", callback_data="admin_gw_force_sub")
+        ]])
+    )
+    raise StopPropagation
+
+
+@Client.on_message(filters.group & ~filters.bot & ~filters.service, group=10)
+async def giveaway_comment_check_handler(client: Client, message: Message):
+    from feature_flags import get_bot_setting
+    global_ch = await get_bot_setting("gw_force_channel", "")
+    if not global_ch or not message.from_user:
+        return
+    user = message.from_user
+    is_sub = await _is_subscribed_to_channel(client, user.id, global_ch)
+    if not is_sub:
+        text = _build_subscription_warning_text(user)
+        link = global_ch if global_ch.startswith("http") else f"https://t.me/{global_ch.lstrip('@')}"
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📢 Kanalga a'zo bo'lish", url=link)
+        ]])
+        try:
+            await message.reply_text(text, reply_markup=kb)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
