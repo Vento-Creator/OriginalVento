@@ -865,7 +865,7 @@ async def baza_state_handler(client: Client, message: Message):
     state_str = state if isinstance(state, str) else (state.get("state") if isinstance(state, dict) else "")
 
     if not state_str.startswith(
-        ("waiting_baza_", "waiting_baza_send|", "waiting_baza_add|", "waiting_users_for_baza|")
+        ("waiting_baza_", "waiting_baza_send|", "waiting_baza_add|", "waiting_users_for_baza|", "waiting_adder_target|")
     ):
         raise ContinuePropagation
 
@@ -1412,10 +1412,55 @@ async def run_adder_task(bot_client: Client, message: Message, uid: int, gid: st
         await message.reply_text("❌ Baza bo'sh!")
         return
         
+    import re
+    target_clean = target_group.strip()
+    
+    # 1. Check if numeric chat ID (-100...)
+    target_input = None
     try:
-        target_chat = await user_client.get_chat(target_group)
-    except Exception as e:
-        await message.reply_text(f"❌ Guruhni topib bo'lmadi yoki kirishga ruxsat yo'q:\n{e}")
+        target_input = int(target_clean)
+    except ValueError:
+        target_input = target_clean
+
+    # 2. Check if invite link
+    is_invite = (
+        isinstance(target_input, str) and (
+            target_input.startswith("+") or
+            "joinchat/" in target_input or
+            "t.me/+" in target_input
+        )
+    )
+
+    target_chat = None
+    if is_invite:
+        try:
+            target_chat = await user_client.join_chat(target_input)
+        except Exception as join_err:
+            try:
+                target_chat = await user_client.get_chat(target_input)
+            except Exception:
+                await message.reply_text(f"❌ Guruhga ulanib bo'lmadi yoki taklif havola noto'g'ri:\n{join_err}")
+                return
+    else:
+        if isinstance(target_input, str):
+            if "t.me/" in target_input:
+                m = re.search(r't\.me/([a-zA-Z0-9_]+)', target_input)
+                if m:
+                    target_input = "@" + m.group(1)
+            elif not target_input.startswith("@") and not target_input.startswith("-"):
+                target_input = "@" + target_input
+        
+        try:
+            target_chat = await user_client.get_chat(target_input)
+        except Exception:
+            try:
+                target_chat = await user_client.join_chat(target_input)
+            except Exception as e:
+                await message.reply_text(f"❌ Guruhni topib bo'lmadi yoki kirishga ruxsat yo'q:\n{e}")
+                return
+
+    if not target_chat:
+        await message.reply_text("❌ Guruh ma'lumotlarini olib bo'lmadi.")
         return
         
     status_msg = await message.reply_text(f"✅ Guruh topildi: **{target_chat.title}**.\n⏳ Odam qo'shish boshlanmoqda...")
