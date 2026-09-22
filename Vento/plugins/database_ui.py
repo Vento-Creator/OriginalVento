@@ -1485,8 +1485,9 @@ async def run_adder_task(bot_client: Client, message: Message, uid: int, gid: st
         if stop_flags.get(f"adder_{uid}"):
             break
             
+        user_to_add = m["username"] if m.get("username") else m["user_id"]
         try:
-            await user_client.add_chat_members(target_chat.id, [m["user_id"]])
+            await user_client.add_chat_members(target_chat.id, [user_to_add])
             added += 1
             await asyncio.sleep(2) # Anti-flood delay
         except UserAlreadyParticipant:
@@ -1494,7 +1495,7 @@ async def run_adder_task(bot_client: Client, message: Message, uid: int, gid: st
         except FloodWait as e:
             await asyncio.sleep(e.value + 1)
             try:
-                await user_client.add_chat_members(target_chat.id, [m["user_id"]])
+                await user_client.add_chat_members(target_chat.id, [user_to_add])
                 added += 1
             except Exception:
                 failed += 1
@@ -1502,6 +1503,17 @@ async def run_adder_task(bot_client: Client, message: Message, uid: int, gid: st
             await message.reply_text("⛔️ Telegram akkauntingiz ko'p odam qo'shgani uchun cheklov oldi (PeerFlood). Jarayon to'xtatildi.")
             break
         except Exception:
+            if m.get("username"):
+                try:
+                    await user_client.add_chat_members(target_chat.id, [m["user_id"]])
+                    added += 1
+                    await asyncio.sleep(2)
+                    continue
+                except UserAlreadyParticipant:
+                    added += 1
+                    continue
+                except Exception:
+                    pass
             failed += 1
             await asyncio.sleep(0.5)
             
