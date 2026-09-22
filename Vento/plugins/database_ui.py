@@ -203,6 +203,17 @@ async def _show_baza_page(cq: CallbackQuery, uid: int, page: int):
     if nav:
         buttons.append(nav)
 
+    if total_pages > 1:
+        if page == 0:
+            buttons.append([InlineKeyboardButton(f"⏭ Oxirgi sahifa ({total_pages})", callback_data=f"admin_baza_page_{total_pages - 1}")])
+        elif page == total_pages - 1:
+            buttons.append([InlineKeyboardButton("⏮ Birinchi sahifa (1)", callback_data="admin_baza_page_0")])
+        else:
+            buttons.append([
+                InlineKeyboardButton("⏮ Birinchi (1)", callback_data="admin_baza_page_0"),
+                InlineKeyboardButton(f"Oxirgi ⏭ ({total_pages})", callback_data=f"admin_baza_page_{total_pages - 1}")
+            ])
+
     buttons.append([InlineKeyboardButton("🔍 ID orqali qidirish", callback_data="baza_search_id")])
     buttons.append([InlineKeyboardButton("🧹 Bazani tozalash", callback_data="baza_clear_menu")])
     buttons.append([InlineKeyboardButton("➕ Yangi user(lar) qo'shish", callback_data="baza_new_users_start")])
