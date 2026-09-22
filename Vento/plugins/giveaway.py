@@ -596,9 +596,12 @@ async def _ensure_channel(c: dict):
     uc = await get_user_client(c["creator_id"])
 
     try:
+        channel_title = f"🎁 {c['name']}"
+        if len(channel_title) > 128:
+            channel_title = channel_title[:125] + "..."
         chat = await uc.create_channel(
-            DEFAULT_CHANNEL_TITLE,
-            description=f"🎁 Konkurs: {c['name']}",
+            channel_title,
+            description=f"Vento Konkurs | Sovrin: {c.get('prize', '')}",
         )
         c["channel_id"] = chat.id
         c["channel_title"] = chat.title
