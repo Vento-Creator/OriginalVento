@@ -42,8 +42,8 @@ class LoginSettings:
         if self.messages is None:
             self.messages = {
                 "welcome": "👋 Xush kelibsiz! Botdan foydalanish uchun akkauntni ulang.",
-                "phone_request": "📱 Telefon raqamingizni xalqaro formatda kiriting:\nMasalan: +998901234567",
-                "phone_invalid": "❌ Noto'g'ri format. Xalqaro formatda kiriting:\n`+998901234567`",
+                "phone_request": "📱 Telefon raqamingizni xalqaro formatda kiriting:\n• UZ: `+998901234567`\n• RU/KZ: `+79001234567`\n• US: `+14155552671`\n• TR: `+905001234567`",
+                "phone_invalid": "❌ Noto'g'ri format. Xalqaro formatda kiriting (Masalan: `+998901234567` yoki `+79001234567`)",
                 "code_sent": "📨 **Kod yuborildi!**\n\n{delivery_info}\n\nKodni yuboring. Kodni `1 2 3 4 5 6`, `1.2.3.4.5.6` yoki boshqa ajratgichlar bilan ham kiritishingiz mumkin:",
                 "code_invalid": "❌ Kod noto'g'ri yoki muddati o'tgan.\n\nQaytadan kodni kiriting:",
                 "password_request": "🔐 **Ikki bosqichli tekshiruv (2FA) yoqilgan!**\n\nParolni yuboring:",
@@ -57,8 +57,8 @@ class LoginSettings:
                 "approved": "🎉 **Tabriklaymiz!**\n\nAkkauntingiz admin tomonidan tasdiqlandi.\nBotdan foydalanish uchun /start bosing.",
                 "rejected": "❌ Sizning so'rovingiz admin tomonidan rad etildi.\n\nBatafsil ma'lumot uchun admin bilan bog'laning.",
                 # Enhanced error messages
-                "phone_number_invalid": "❌ **Telefon raqami noto'g'ri**\n\nRaqam xalqaro formatda bo'lishi kerak:\n• O'zbekiston: +998901234567\n• Xalqaro: +1234567890",
-                "phone_number_banned": "❌ **Telefon raqami bloklangan**\n\nBu raqam Telegram tomonidan cheklangan.\nIltimos, boshqa raqam bilan urinib ko'ring yoki Telegram qo'llab-quvvatlashiga murojaat qiling.",
+                "phone_number_invalid": "❌ **Telefon raqami noto'g'ri**\n\nRaqam xalqaro formatda bo'lishi kerak:\n• O'zbekiston: +998...\n• Rossiya / Qozog'iston: +7...\n• Boshqa davlatlar: +1..., +90..., +49...",
+                "phone_number_banned": "❌ **Telefon raqami bloklangan**\n\nBu raqam Telegram tomonidan taqiqlangan (Banned/VoIP).\nVirtual (VoIP) raqamlarga Telegram ruxsat bermaydi.",
                 "flood_wait": "⏳ **Ko'p urinishlar**\n\nTelegram tomonidan vaqtinchalik cheklov qo'yildi.\nIltimos, {wait_time} soniya kutib qaytadan urinib ko'ring.",
                 "sms_blocked": "❌ **SMS yuborish bloklangan**\n\nTelegram SMS xizmatidan foydalanish imkonsiz.\n\nTavsiyalar:\n• VPN yoqib o'chirib ko'ring\n• Boshqa usulni tanlang (qo'ng'iroq)\n• Keyinroq qaytadan urinib ko'ring",
                 "phone_password_flood": "❌ **Parol xato urinishlari ko'p**\n\nXavfsizlik sababli vaqtinchalik cheklov qo'yildi.\nIltimos, 15-30 daqiqadan keyin qaytadan urinib ko'ring.",

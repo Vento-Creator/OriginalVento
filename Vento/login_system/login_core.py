@@ -114,8 +114,11 @@ class SessionManager:
 
 
 class PhoneValidator:
-    """Validates phone numbers with E.164 format support"""
+    """Validates international phone numbers with E.164 format support and restricted prefix checking"""
     
+    # Banned/Restricted prefixes (Satellite, Non-Geographic, Sanctioned regions)
+    BANNED_PREFIXES = ("+881", "+882", "+883", "+870", "+850", "+963")
+
     @staticmethod
     def normalize_phone(phone: str) -> str:
         """Normalize common human-entered phone formats to E.164-style ``+digits``."""
@@ -123,6 +126,7 @@ class PhoneValidator:
         digits_only = "".join(c for c in raw if c.isdigit())
         if digits_only.startswith("00"):
             digits_only = digits_only[2:]
+        # If 9 digits starting with 9, default to Uzbekistan (+998)
         if len(digits_only) == 9 and digits_only.startswith("9"):
             digits_only = "998" + digits_only
         return f"+{digits_only}" if digits_only else ""
@@ -130,13 +134,11 @@ class PhoneValidator:
     @staticmethod
     def validate(phone: str) -> Tuple[bool, str]:
         """
-        Validate phone number format with E.164 standard
+        Validate international phone number format with E.164 standard
         
         Returns:
             (is_valid, error_message)
         """
-        import re
-        
         phone = phone.strip()
         
         # Normalize first
@@ -147,12 +149,17 @@ class PhoneValidator:
         
         # Basic format validation: must start with + followed by digits
         if not phone.startswith("+"):
-            return False, "Telefon raqami + bilan boshlanishi kerak"
+            return False, "Telefon raqami + bilan boshlanishi kerak (Masalan: +998901234567, +79001234567, +14155552671)"
         
         if not phone[1:].isdigit():
             return False, "Telefon raqami faqat raqamlardan iborat bo'lishi kerak"
+
+        # Check restricted prefixes
+        for prefix in PhoneValidator.BANNED_PREFIXES:
+            if phone.startswith(prefix):
+                return False, f"🚫 `{prefix}` prefiksli raqamlar Telegram serverlarida taqiqlangan. Iltimos, mobil raqamingizni kiriting."
         
-        # Length validation: E.164 numbers are typically 10-15 digits (excluding +)
+        # Length validation: E.164 numbers are 10-15 digits total (excluding +)
         digit_count = len(phone[1:])
         if digit_count < 10 or digit_count > 15:
             return False, f"Telefon raqami uzunligi noto'g'ri (hozir {digit_count} ta raqam, 10-15 ta bo'lishi kerak)"
@@ -160,23 +167,13 @@ class PhoneValidator:
         # Try to validate with phonenumbers library if available
         try:
             import phonenumbers
-            # Parse the phone number
             parsed = phonenumbers.parse(phone, None)
-            
-            # Check if the number is valid
-            if not phonenumbers.is_valid_number(parsed):
-                return False, "Telefon raqami noto'g'ri formatda"
-            
-            # Check if the number is possible (for more lenient validation)
             if not phonenumbers.is_possible_number(parsed):
-                return False, "Telefon raqami mavjud emas"
-                
+                return False, "Telefon raqami formati xalqaro standartga mos kelmaydi"
         except ImportError:
-            # phonenumbers library not available, use basic validation
-            logger.warning("phonenumbers library not available, using basic validation")
-        except Exception as e:
-            # If phonenumbers fails, fall back to basic validation
-            logger.warning(f"phonenumbers validation failed: {e}, using basic validation")
+            pass
+        except Exception:
+            pass
         
         return True, ""
 
@@ -681,19 +678,24 @@ class AuthManager:
             error_msg = default_settings.messages.get("api_id_invalid", "API_ID noto'g'ri. Iltimos, admin bilan bog'laning.")
             raise ValidationError(error_msg)
         except Exception as e:
-            error_msg = str(e)
-            # Provide more specific error messages for common issues
+            err_msg = str(e)
+            err_upper = err_msg.upper()
             from login_system.login_config import default_settings
-            if "PHONE_CODE_EMPTY" in error_msg or "PhoneCodeEmpty" in error_msg:
+            if "PHONE_NUMBER_INVALID" in err_upper or "PHONENUMBERINVALID" in err_upper:
+                raise ValidationError("❌ Telefon raqami noto'g'ri yoki Telegram'da mavjud emas.")
+            elif "PHONE_NUMBER_BANNED" in err_upper or "PHONENUMBERBANNED" in err_upper:
+                raise ValidationError("🚫 Bu telefon raqami Telegram tomonidan bloklangan (Banned/VoIP).")
+            elif "PHONE_NUMBER_FLOOD" in err_upper or "PHONE_PASSWORD_FLOOD" in err_upper:
+                raise ValidationError("⏳ Bu raqamga juda ko'p kiritish so'ralgan. Birozdan so'ng qayta urining.")
+            elif "PHONE_NUMBER_UNOCCUPIED" in err_upper:
+                raise ValidationError("❌ Bu raqamda Telegram hisob mavjud emas. Avval Telegram rasmiy ilovasida ro'yxatdan o'ting.")
+            elif "PHONE_CODE_EMPTY" in err_upper or "PHONECODEEMPTY" in err_upper:
                 raise ValidationError("Kod bo'sh. Iltimos, qaytadan urinib ko'ring.")
-            elif "PHONE_PASSWORD_FLOOD" in error_msg:
-                error_msg = default_settings.messages.get("phone_password_flood", "Ko'p urinishlar amalga oshirildi. Iltimos, bir necha daqiqadan keyin qaytadan urinib ko'ring.")
-                raise ValidationError(error_msg)
-            elif "SMS_BLOCKED" in error_msg:
-                error_msg = default_settings.messages.get("sms_blocked", "SMS yuborish bloklangan. Iltimos, qo'ng'iroq usulini tanlang yoki VPN ishlatib ko'ring.")
+            elif "SMS_BLOCKED" in err_upper:
+                error_msg = default_settings.messages.get("sms_blocked", "SMS yuborish bloklangan.")
                 raise ValidationError(error_msg)
             else:
-                raise LoginError(f"Kod yuborishda xatolik: {e}")
+                raise ValidationError(f"❌ Kod yuborishda xatolik: {err_msg}")
     
     async def resend_code(self, client: Client, phone: str, phone_code_hash: str, force_sms: bool = False) -> Tuple[bool, str, Optional[str], dict, int]:
         """Resend using Telegram's auth.resendCode flow and return server metadata.

@@ -484,7 +484,7 @@ async def menu_button_handler(client: Client, message: Message):
             user_states[uid] = "waiting_for_phone"
             login_data[uid]  = {}
             await message.reply_text(
-                "📱 Telegram raqamingizni xalqaro formatda yuboring:\n`+998901234567`",
+                "📱 Telegram raqamingizni xalqaro formatda yuboring:\nMasalan: `+998901234567`, `+79001234567`, `+14155552671`, `+905001234567`",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_login")]
                 ])
@@ -677,7 +677,7 @@ async def do_link_account_callback(client: Client, cq: CallbackQuery):
     user_states[uid] = "waiting_for_phone"
     login_data[uid]  = {}
     await cq.message.edit_text(
-        "📱 Telegram raqamingizni xalqaro formatda yuboring:\n`+998901234567`",
+        "📱 Telegram raqamingizni xalqaro formatda yuboring:\nMasalan: `+998901234567`, `+79001234567`, `+14155552671`, `+905001234567`",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_login")]
         ])
