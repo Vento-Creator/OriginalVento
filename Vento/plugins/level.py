@@ -4,10 +4,10 @@
 Xususiyatlar:
   • Har bir guruh xabari uchun foydalanuvchiga XP beriladi (cooldown bilan anti-spam).
   • Reply qilib '+' yuborilganda:
-      - Reply qilingan xabar mazmundorligi va faktual belgilar ("shuning uchun", "demak", "chunki" va h.k.) tekshiriladi.
-      - Reply qilingan foydalanuvchiga +2 XP beriladi.
-      - '+' bosgan foydalanuvchiga +1 XP beriladi.
-      - Bir foydalanuvchi ikkinchisiga har 5 daqiqada faqat 1 marta '+' bera oladi (dinamik cooldown).
+      - Reply qilingan xabar tekshiriladi (kamida 5 ta belgi, kalit so'zlar yoki media).
+      - Reply qilingan foydalanuvchiga +25 XP beriladi.
+      - '+' bosgan foydalanuvchiga +10 XP beriladi.
+      - Cooldown: 30 soniya.
   • Avto-Level Up bildirishnomasi:
       - Bot orqali shaxsiy xabarda (PM) batafsil statistika yuboriladi.
       - Agar shaxsiy chatdan yozish imkoni bo'lmasa (bot bloklangan bo'lsa), guruhdagi xabarga maxsus ogohlantirish qo'shib ketiladi:
@@ -15,6 +15,7 @@ Xususiyatlar:
   • /rank, /level, /xp — o'zining yoki belgilan a'zoning darajasi va statistikasi.
   • /top, /leaderboard — guruhning Top-10 faol a'zolari reytingi.
   • /xpsettings — adminlar uchun guruh sozlamalarini boshqarish.
+  • /checkxp — bot adminlari uchun interaktiv XP boshqarish paneli.
   • /addxp, /removexp, /setlevel — guruh adminlari tomonidan XP/darajani qo'lda sozlash.
 """
 
@@ -91,7 +92,7 @@ def get_next_title_name(level: int) -> str:
     for min_lvl, name, _ in TITLES:
         if min_lvl > level:
             return name
-    return "Geroy"
+    return "Maksimal unvon (Oliy Daraja) 👑"
 
 
 def calculate_level(xp: int) -> int:
@@ -122,33 +123,32 @@ def make_progress_bar(current: int, total: int, length: int = 5) -> str:
 
 
 def is_quality_message(target_msg: Message) -> Tuple[bool, str]:
-    """Reply qilingan xabar mazmunli yoki faktual ekanligini aniqlash.
+    """Reply qilingan xabar mazmunli yoki mos ekanligini aniqlash.
     
     Qoidalar:
-      1. Media (rasm, video, hujjat, audio) bo'lsa -> Mazmunli
-      2. Fakt/mantiqiy so'zlar ("shuning uchun", "demak", "chunki" va h.k.) mavjud bo'lsa -> Mazmunli
-      3. Uzunligi kamida 30 ta belgi bo'lsa -> Mazmunli
+      1. Media (rasm, video, hujjat, audio, stiker) bo'lsa -> Qabul qilinadi
+      2. Kamida 5 ta belgi bo'lsa -> Qabul qilinadi
+      3. Fakt/mantiqiy so'zlar bo'lsa -> Qabul qilinadi
     """
     if not target_msg:
         return False, "Xabar topilmadi"
 
-    if target_msg.photo or target_msg.video or target_msg.document or target_msg.audio or target_msg.voice:
+    if target_msg.photo or target_msg.video or target_msg.document or target_msg.audio or target_msg.voice or target_msg.sticker:
         return True, "media"
 
     text = (target_msg.text or target_msg.caption or "").strip()
     if not text:
         return False, "Matn yo'q"
 
-    text_lower = text.lower()
+    if len(text) >= 5:
+        return True, "valid_length"
 
+    text_lower = text.lower()
     for kw in QUALITY_KEYWORDS:
         if kw in text_lower:
             return True, f"fakt_soz ({kw})"
 
-    if len(text) >= 30:
-        return True, "uzun_matn"
-
-    return False, "mazmunsiz_qisqa"
+    return False, "juda_qisqa"
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ async def update_group_settings(chat_id: int, **kwargs):
     async with get_db_connection() as db:
         await db.execute("""
             INSERT INTO group_xp_settings (chat_id, is_enabled, announce_levelup, xp_per_msg, cooldown_sec)
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 is_enabled = EXCLUDED.is_enabled,
                 announce_levelup = EXCLUDED.announce_levelup,
@@ -338,31 +338,32 @@ async def process_group_xp(client: Client, message: Message):
     # -----------------------------------------------------------------------
     # Dynamic Smart Reply '+' rejimi
     # -----------------------------------------------------------------------
-    if message.reply_to_message and message.reply_to_message.from_user and (text == "+" or text.startswith("+1") or text.startswith("+rep") or text.startswith("++")):
+    if message.reply_to_message and message.reply_to_message.from_user and (
+        text == "+" or text.startswith("+") or text.startswith("👍") or text.startswith("❤️") or text.startswith("🔥")
+    ):
         target_user = message.reply_to_message.from_user
 
         # O'ziga o'zi yoki botga + bosish taqiqlanadi
         if target_user.id == user_id or target_user.is_bot:
             raise ContinuePropagation
 
-        # 1. Mazmundorlik filtri (Filtrdan o'tmasa XP berilmaydi)
+        # 1. Mazmundorlik filtri
         is_valuable, reason = is_quality_message(message.reply_to_message)
         if not is_valuable:
             try:
                 await message.reply_text(
-                    "⚠️ '+' faqat mazmunli yoki faktual xabarlarga beriladi! "
-                    "(Masalan: 'shuning uchun', 'demak', 'chunki' kabi fakt belgili yoki rasm/media xabarlarga)."
+                    "⚠️ '+' kamida 5 ta belgidan iborat mazmunli xabar yoki media posti uchun beriladi."
                 )
             except Exception:
                 pass
             raise ContinuePropagation
 
-        # 2. Dinamik Cooldown (Bir a'zo ikkinchisiga faqat har 5 daqiqada 1 marta + bera oladi)
+        # 2. Dinamik Cooldown (1 daqiqa)
         pair_cd_key = (chat_id, user_id, target_user.id, "rep_pair")
         last_pair = _cooldown_cache.get(pair_cd_key, 0)
-        if now - last_pair < 300:  # 5 daqiqa
+        if now - last_pair < 60:  # 60 soniya (1 daqiqa)
             try:
-                await message.reply_text("⚠️ Bir foydalanuvchiga har 5 daqiqada faqat 1 marta '+' berishingiz mumkin.")
+                await message.reply_text("⚠️ Bir foydalanuvchiga har 1 daqiqada faqat 1 marta '+' berishingiz mumkin.")
             except Exception:
                 pass
             raise ContinuePropagation
@@ -386,7 +387,7 @@ async def process_group_xp(client: Client, message: Message):
 
             await db.execute("""
                 INSERT INTO group_user_xp (chat_id, user_id, xp, level, messages_count, last_xp_time, first_name, username)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chat_id, user_id) DO UPDATE SET
                     xp = EXCLUDED.xp,
                     level = EXCLUDED.level,
@@ -410,7 +411,7 @@ async def process_group_xp(client: Client, message: Message):
 
             await db.execute("""
                 INSERT INTO group_user_xp (chat_id, user_id, xp, level, messages_count, last_xp_time, first_name, username)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chat_id, user_id) DO UPDATE SET
                     xp = EXCLUDED.xp,
                     level = EXCLUDED.level,
@@ -787,7 +788,7 @@ async def admin_manage_xp(client: Client, message: Message):
 
         await db.execute("""
             INSERT INTO group_user_xp (chat_id, user_id, xp, level, messages_count, last_xp_time, first_name, username)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id, user_id) DO UPDATE SET
                 xp = EXCLUDED.xp,
                 level = EXCLUDED.level,
@@ -804,18 +805,13 @@ async def admin_manage_xp(client: Client, message: Message):
 
 @Client.on_message(filters.command("checkxp"))
 async def checkxp_command(client: Client, message: Message):
-    """Bot adminlari uchun XP va darajani tekshirish va boshqarish paneli (/checkxp).
-    
-    Agar admin da 'can_manage_xp' (XP nazorati huquqi) bo'lmasa, bot unga UMUMAN javob bermaydi.
-    """
+    """Bot adminlari uchun XP va darajani tekshirish va boshqarish paneli (/checkxp)."""
     sender_id = message.from_user.id if message.from_user else 0
     if not sender_id or not await can_manage_xp(sender_id):
-        # Huquqi bo'lmasa — bot mutlaqo jim qoladi (javob bermaydi)
         return
 
     await _ensure_level_tables()
 
-    # Target foydalanuvchini aniqlash (reply qilingan yoki buyruqda kiritilgan)
     target_user = None
     if message.reply_to_message and message.reply_to_message.from_user:
         target_user = message.reply_to_message.from_user
@@ -884,6 +880,7 @@ async def build_checkxp_panel(chat_id: int, target_user, admin_id: int) -> Tuple
             InlineKeyboardButton("➖ Daraja olib tashlash", callback_data=f"xpadmin_sub:{user_id}:{admin_id}"),
         ],
         [
+            InlineKeyboardButton("🌌 Maksimal unvon (Lvl 50)", callback_data=f"xpadmin_max:{user_id}:{admin_id}"),
             InlineKeyboardButton("💥 Bankrot qilish (0 XP)", callback_data=f"xpadmin_reset:{user_id}:{admin_id}"),
         ],
         [
@@ -899,7 +896,6 @@ async def checkxp_admin_callback(client: Client, cq: CallbackQuery):
     target_id = int(cq.matches[0].group(2))
     allowed_admin_id = int(cq.matches[0].group(3))
 
-    # Xavfsizlik tekshiruvi: faqat komanda yuborgan admin bosishi mumkin
     if cq.from_user.id != allowed_admin_id:
         await cq.answer("❌ Bu tugma siz uchun emas!", show_alert=True)
         return
@@ -931,6 +927,10 @@ async def checkxp_admin_callback(client: Client, cq: CallbackQuery):
             new_lvl = max(1, cur_lvl - 1)
             new_xp = xp_for_level(new_lvl)
             ans_text = f"✅ Daraja {new_lvl} ga tushirildi!"
+        elif action == "max":
+            new_lvl = 50
+            new_xp = xp_for_level(new_lvl)
+            ans_text = "🌌 Foydalanuvchiga Maksimal unvon (Level 50, Geroy) berildi!"
         elif action == "reset":
             new_lvl = 1
             new_xp = 0
@@ -940,7 +940,7 @@ async def checkxp_admin_callback(client: Client, cq: CallbackQuery):
 
         await db.execute("""
             INSERT INTO group_user_xp (chat_id, user_id, xp, level, messages_count, last_xp_time, first_name, username)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id, user_id) DO UPDATE SET
                 xp = EXCLUDED.xp,
                 level = EXCLUDED.level,

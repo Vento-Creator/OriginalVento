@@ -467,7 +467,7 @@ Guruh a'zolarining faolligiga qarab XP, level va unvon berish tizimi.
 
 ### Adminlar va Bot Adminlari uchun buyruqlar:
 - `/xpsettings` — Guruh XP va Level sozlamalari menyusi (XP tizimini yoqish/o'chirish, Level Up xabarlarini boshqarish, xabar uchun XP miqdori va cooldown vaqtini tanlash, reytingni tozalash).
-- `/checkxp` — (Faqat "🏆 XP nazorati huquqi" bor Bot adminlari uchun) Reply qilingan a'zoning XP va darajasini tekshirish hamda interaktiv tugmalar orqali boshqarish paneli (`➕ Daraja qo'shish`, `➖ Daraja olib tashlash`, `💥 Bankrot qilish`). *Huquq bo'lmasa bot javob bermaydi.*
+- `/checkxp` — (Faqat "🏆 XP nazorati huquqi" bor Bot adminlari uchun) Reply qilingan a'zoning XP va darajasini tekshirish hamda interaktiv tugmalar orqali boshqarish paneli (`➕ Daraja qo'shish`, `➖ Daraja olib tashlash`, `🌌 Maksimal unvon`, `💥 Bankrot qilish`). *Huquq bo'lmasa bot javob bermaydi.*
 - `/addxp [miqdor]` — Reply qilingan foydalanuvchiga XP qo'shish (Masalan: `/addxp 500`).
 - `/removexp [miqdor]` — Reply qilingan foydalanuvchidan XP olib tashlash.
 - `/setlevel [daraja]` — Reply qilingan foydalanuvchi darajasini belgilash (Masalan: `/setlevel 5`).
