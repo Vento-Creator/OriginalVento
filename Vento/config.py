@@ -186,6 +186,10 @@ async def can_use_owner_ux(user_id: int) -> bool:
     """Owner UX reply (.xa, .xs, .xp, .xr) komandalarini ishlatish huquqini tekshirish"""
     return await has_permission(user_id, "can_use_owner_ux")
 
+async def can_manage_xp(user_id: int) -> bool:
+    """XP va Level tizimini boshqarish huquqini tekshirish"""
+    return await has_permission(user_id, "can_manage_xp")
+
 user_states = {}
 login_data = {}
 user_clients = {}

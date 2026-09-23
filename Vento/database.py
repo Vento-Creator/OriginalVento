@@ -1421,7 +1421,7 @@ async def get_user_recent_actions(user_id: int, limit: int = 10):
 async def _ensure_admin_permission_columns():
     """Ensure admins table contains new permission columns"""
     async with get_db_connection() as db:
-        for col in ("can_manage_scraper", "can_use_owner_ux"):
+        for col in ("can_manage_scraper", "can_use_owner_ux", "can_manage_xp"):
             try:
                 await db.execute(f"ALTER TABLE admins ADD COLUMN {col} INTEGER DEFAULT 1")
                 await db.commit()
@@ -1434,8 +1434,8 @@ async def add_admin(admin_id: int, joined_date: int, admin_date: int):
     await _ensure_admin_permission_columns()
     async with get_db_connection() as db:
         await db.execute('''
-            INSERT INTO admins (admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users, can_manage_scraper, can_use_owner_ux)
-            VALUES (?, ?, ?, 0, 0, 0, 0, 1, 0, 0)
+            INSERT INTO admins (admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users, can_manage_scraper, can_use_owner_ux, can_manage_xp)
+            VALUES (?, ?, ?, 0, 0, 0, 0, 1, 0, 0, 1)
             ON CONFLICT (admin_id) DO UPDATE SET
                 joined_date = EXCLUDED.joined_date,
                 admin_date = EXCLUDED.admin_date
@@ -1453,7 +1453,7 @@ async def get_all_admins():
     await _ensure_admin_permission_columns()
     async with get_db_connection() as db:
         async with db.execute("""
-            SELECT admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users, can_manage_scraper, can_use_owner_ux
+            SELECT admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users, can_manage_scraper, can_use_owner_ux, can_manage_xp
             FROM admins
         """) as cursor:
             rows = await cursor.fetchall()
@@ -1462,7 +1462,8 @@ async def get_all_admins():
                 "can_add_admin": bool(r[3]), "can_ban": bool(r[4]), "can_clear_db": bool(r[5]),
                 "can_broadcast": bool(r[6]), "can_manage_users": bool(r[7]),
                 "can_manage_scraper": bool(r[8] if len(r) > 8 and r[8] is not None else True),
-                "can_use_owner_ux": bool(r[9] if len(r) > 9 and r[9] is not None else True)
+                "can_use_owner_ux": bool(r[9] if len(r) > 9 and r[9] is not None else True),
+                "can_manage_xp": bool(r[10] if len(r) > 10 and r[10] is not None else True)
             } for r in rows]
 
 async def log_admin_action(admin_id: int, action: str, target_id: int = None, details: str = None):
@@ -1501,7 +1502,7 @@ async def get_admin_info(admin_id: int):
     await _ensure_admin_permission_columns()
     async with get_db_connection() as db:
         async with db.execute("""
-            SELECT admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users, can_manage_scraper, can_use_owner_ux
+            SELECT admin_id, joined_date, admin_date, can_add_admin, can_ban, can_clear_db, can_broadcast, can_manage_users, can_manage_scraper, can_use_owner_ux, can_manage_xp
             FROM admins WHERE admin_id = ?
         """, (admin_id,)) as cursor:
             row = await cursor.fetchone()
@@ -1512,7 +1513,8 @@ async def get_admin_info(admin_id: int):
                 "can_add_admin": bool(row[3]), "can_ban": bool(row[4]), "can_clear_db": bool(row[5]),
                 "can_broadcast": bool(row[6]), "can_manage_users": bool(row[7]),
                 "can_manage_scraper": bool(row[8] if len(row) > 8 and row[8] is not None else True),
-                "can_use_owner_ux": bool(row[9] if len(row) > 9 and row[9] is not None else True)
+                "can_use_owner_ux": bool(row[9] if len(row) > 9 and row[9] is not None else True),
+                "can_manage_xp": bool(row[10] if len(row) > 10 and row[10] is not None else True)
             }
 
 async def update_admin_permission(admin_id: int, permission: str, value: bool):

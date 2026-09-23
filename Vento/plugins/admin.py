@@ -1360,7 +1360,8 @@ async def admin_view_callback(client: Client, cq: CallbackQuery):
         f"📢 Broadcast: {'✅ On' if admin_info['can_broadcast'] else '❌ Off'}\n"
         f"👥 Foydalanuvchilarni boshqarish: {'✅ On' if admin_info['can_manage_users'] else '❌ Off'}\n"
         f"🧠 Scraper sozlamalari: {'✅ On' if admin_info.get('can_manage_scraper', True) else '❌ Off'}\n"
-        f"🎯 Owner UX komandalar: {'✅ On' if admin_info.get('can_use_owner_ux', True) else '❌ Off'}"
+        f"🎯 Owner UX komandalar: {'✅ On' if admin_info.get('can_use_owner_ux', True) else '❌ Off'}\n"
+        f"🏆 XP nazorati: {'✅ On' if admin_info.get('can_manage_xp', True) else '❌ Off'}"
     )
     
     buttons = []
@@ -1380,6 +1381,9 @@ async def admin_view_callback(client: Client, cq: CallbackQuery):
         ])
         buttons.append([
             InlineKeyboardButton("🎯 Owner UX", callback_data=f"_perm_ownerux_{admin_id}"),
+            InlineKeyboardButton("🏆 XP nazorati", callback_data=f"_perm_xp_{admin_id}")
+        ])
+        buttons.append([
             InlineKeyboardButton("❌ Adminlikdan olish", callback_data=f"_admin_remove_confirm_{admin_id}")
         ])
     else:
@@ -1407,7 +1411,8 @@ async def admin_toggle_permission_callback(client: Client, cq: CallbackQuery):
         "broadcast": "can_broadcast",
         "users": "can_manage_users",
         "scraper": "can_manage_scraper",
-        "ownerux": "can_use_owner_ux"
+        "ownerux": "can_use_owner_ux",
+        "xp": "can_manage_xp"
     }
     
     db_perm = perm_map.get(permission)
