@@ -136,13 +136,26 @@ async def owner_backup_document_handler(client: Client, message: Message):
         os.makedirs(SESSIONS_DIR, exist_ok=True)
         restored_count = 0
 
+        from session_manager import close_user_client
+
+        def extract_uid(filename: str):
+            match = re.search(r'user_(\d+)', filename)
+            return int(match.group(1)) if match else None
+
         if fn.endswith(".tar.gz") or fn.endswith(".tgz") or fn.endswith(".tar"):
             with tarfile.open(file_path, "r:*") as tar:
                 for member in tar.getmembers():
                     if member.name.endswith(".session") or member.name.endswith(".json"):
-                        # Determine clean extraction path inside SESSIONS_DIR
                         base_name = os.path.basename(member.name)
                         dest_path = os.path.join(SESSIONS_DIR, base_name)
+                        
+                        uid_target = extract_uid(base_name)
+                        if uid_target:
+                            try:
+                                await close_user_client(uid_target)
+                            except Exception:
+                                pass
+                                
                         with tar.extractfile(member) as src_f:
                             if src_f:
                                 with open(dest_path, "wb") as dst_f:
@@ -155,13 +168,28 @@ async def owner_backup_document_handler(client: Client, message: Message):
                     if zip_info.filename.endswith(".session") or zip_info.filename.endswith(".json"):
                         base_name = os.path.basename(zip_info.filename)
                         dest_path = os.path.join(SESSIONS_DIR, base_name)
+                        
+                        uid_target = extract_uid(base_name)
+                        if uid_target:
+                            try:
+                                await close_user_client(uid_target)
+                            except Exception:
+                                pass
+                                
                         with zip_ref.open(zip_info) as src_f:
                             with open(dest_path, "wb") as dst_f:
                                 dst_f.write(src_f.read())
                             if base_name.endswith(".session"):
                                 restored_count += 1
         elif fn.endswith(".session"):
-            dest_path = os.path.join(SESSIONS_DIR, os.path.basename(fn))
+            base_name = os.path.basename(fn)
+            dest_path = os.path.join(SESSIONS_DIR, base_name)
+            uid_target = extract_uid(base_name)
+            if uid_target:
+                try:
+                    await close_user_client(uid_target)
+                except Exception:
+                    pass
             import shutil
             shutil.copy(file_path, dest_path)
             restored_count = 1
