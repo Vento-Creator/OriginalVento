@@ -321,15 +321,85 @@ async def set_challenge_command(client: Client, message: Message):
             InlineKeyboardButton("👥 100 Yangi A'zo", callback_data=f"ch_preset_mem_100_{chat_id}"),
             InlineKeyboardButton("👥 50 Yangi A'zo", callback_data=f"ch_preset_mem_50_{chat_id}"),
         ],
+        [
+            InlineKeyboardButton("✏️ Custom Xabar soni", callback_data=f"ch_custom_msg_{chat_id}"),
+            InlineKeyboardButton("✏️ Custom A'zo soni", callback_data=f"ch_custom_mem_{chat_id}"),
+        ],
         [InlineKeyboardButton("❌ Bekor Qilish", callback_data="ch_close")],
     ]
     
     text = (
         "🎯 <b>Yangi Guruh Maqsadi O'rnatish</b>\n\n"
-        "Tayyor shablonlardan birini tanlang yoki komanda yuboring:\n"
-        "<code>/setchallenge messages 10000 Haftalik 10k xabar</code>"
+        "Tayyor shablonlardan birini tanlang yoki o'zingiz raqam kiriting:\n"
+        "Buyruq orqali: <code>/setchallenge messages 12345 Haftalik Faollik</code>"
     )
     await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
+
+
+@Client.on_message(filters.group & filters.text & ~filters.service, group=9)
+async def challenge_wizard_input(client: Client, message: Message):
+    """Handle custom number input for challenge setup wizard."""
+    user_id = message.from_user.id if message.from_user else 0
+    if user_id not in _challenge_wizard_state:
+        raise ContinuePropagation
+        
+    state = _challenge_wizard_state[user_id]
+    if message.chat.id != state.get("chat_id"):
+        raise ContinuePropagation
+
+    # Check state TTL (5 minutes)
+    if time.time() - state.get("time", 0) > 300:
+        _challenge_wizard_state.pop(user_id, None)
+        raise ContinuePropagation
+
+    text = message.text.strip()
+    if text.lower() in ("/cancel", "cancel", "bekor"):
+        _challenge_wizard_state.pop(user_id, None)
+        await message.reply_text("❌ Maqsad o'rnatish bekor qilindi.")
+        return
+
+    try:
+        target_val = int(text)
+        if target_val <= 0:
+            raise ValueError
+    except ValueError:
+        await message.reply_text("❌ Iltimos, faqat musbat son kiriting (Masalan: <code>15000</code>).", parse_mode=ParseMode.HTML)
+        return
+
+    _challenge_wizard_state.pop(user_id, None)
+    ctype = state.get("type", "messages")
+    unit_str = "xabar" if ctype == "messages" else "yangi a'zo"
+    title = f"{target_val:,} ta {unit_str}"
+    cid = message.chat.id
+
+    async with get_db_connection() as db:
+        await db.execute(
+            "UPDATE group_challenges SET is_active = FALSE WHERE chat_id = ? AND is_active = TRUE",
+            (cid,)
+        )
+        await db.execute(
+            """
+            INSERT INTO group_challenges (chat_id, title, challenge_type, target_count, current_count, start_time, created_by)
+            VALUES (?, ?, ?, ?, 0, ?, ?)
+            """,
+            (cid, title, ctype, target_val, int(time.time()), user_id)
+        )
+
+    bar_str, pct = format_progress_bar(0, target_val)
+    ctype_label = "💬 Xabarlar" if ctype == "messages" else "👥 Yangi a'zolar"
+    reply_text = (
+        f"✅ <b>Yangi guruh maqsadi o'rnatildi!</b>\n\n"
+        f"📌 <b>Nomi</b>: {title}\n"
+        f"🏷 <b>Turi</b>: {ctype_label}\n"
+        f"📊 <b>Progress</b>: 0 / {target_val:,} (0%)\n"
+        f"📈 <code>{bar_str}</code>\n\n"
+        f"Barchamiz faol bo'lib marraga erishamiz! 💪"
+    )
+    buttons = [
+        [InlineKeyboardButton("🔄 Yangilash", callback_data=f"ch_refresh_{cid}")],
+        [InlineKeyboardButton("❌ Yopish", callback_data="ch_close")]
+    ]
+    await message.reply_text(reply_text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +413,7 @@ async def challenge_callback_handler(client: Client, cq: CallbackQuery):
     chat_id = cq.message.chat.id if cq.message and cq.message.chat else 0
     
     if data == "ch_close":
+        _challenge_wizard_state.pop(user_id, None)
         try:
             await cq.message.delete()
         except Exception:
@@ -365,18 +436,53 @@ async def challenge_callback_handler(client: Client, cq: CallbackQuery):
                 InlineKeyboardButton("👥 100 Yangi A'zo", callback_data=f"ch_preset_mem_100_{cid}"),
                 InlineKeyboardButton("👥 50 Yangi A'zo", callback_data=f"ch_preset_mem_50_{cid}"),
             ],
+            [
+                InlineKeyboardButton("✏️ Custom Xabar soni", callback_data=f"ch_custom_msg_{cid}"),
+                InlineKeyboardButton("✏️ Custom A'zo soni", callback_data=f"ch_custom_mem_{cid}"),
+            ],
             [InlineKeyboardButton("❌ Bekor Qilish", callback_data="ch_close")],
         ]
         text = (
             "🎯 <b>Yangi Guruh Maqsadi O'rnatish</b>\n\n"
-            "Tayyor shablonlardan birini tanlang yoki komanda yuboring:\n"
-            "<code>/setchallenge messages 10000 Haftalik faollik</code>"
+            "Tayyor shablonlardan birini tanlang yoki o'ziz raqam kiriting:\n"
+            "Buyruq orqali: <code>/setchallenge messages 12345</code>"
         )
         try:
             await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
         except Exception as e:
             logger.warning(f"edit_text error in ch_new_: {e}")
         return
+
+    # Custom prompt trigger
+    if data.startswith("ch_custom_"):
+        parts = data.split("_") # ch, custom, type, chat_id
+        if len(parts) >= 4:
+            ctype_raw = parts[2]
+            cid = int(parts[3])
+            
+            if not await is_group_admin(client, cid, user_id):
+                await cq.answer("❌ Maqsadlarni faqat guruh adminlari belgilashi mumkin!", show_alert=True)
+                return
+
+            ctype = "messages" if ctype_raw == "msg" else "members"
+            _challenge_wizard_state[user_id] = {
+                "chat_id": cid,
+                "type": ctype,
+                "time": time.time()
+            }
+            
+            unit_label = "xabarlar" if ctype == "messages" else "yangi a'zolar"
+            text = (
+                f"✏️ <b>O'zingiz mos kiritmoqchi bo'lgan maqsad ({unit_label}) sonini guruhga yozing:</b>\n\n"
+                f"Masalan: <code>15000</code> yoki <code>250</code>\n"
+                f"<i>(Bekor qilish uchun /cancel deb yozing)</i>"
+            )
+            try:
+                await cq.message.edit_text(text, parse_mode=ParseMode.HTML)
+            except Exception:
+                pass
+            await cq.answer()
+            return
 
     # Quick preset challenge setup
     if data.startswith("ch_preset_"):
