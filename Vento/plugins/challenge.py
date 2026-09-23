@@ -88,7 +88,7 @@ def format_progress_bar(current: int, target: int, length: int = 10) -> Tuple[st
 
 async def is_group_admin(client: Client, chat_id: int, user_id: int) -> bool:
     """Check if the given user is an admin or creator in the specified group chat."""
-    if await is_owner(user_id):
+    if is_owner(user_id):
         return True
     try:
         member = await client.get_chat_member(chat_id, user_id)
