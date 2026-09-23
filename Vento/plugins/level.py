@@ -964,3 +964,64 @@ async def checkxp_admin_callback(client: Client, cq: CallbackQuery):
         pass
 
     await cq.answer(ans_text, show_alert=(action == "reset"))
+
+
+# ---------------------------------------------------------------------------
+# "📊 Darajamni ko'rish" Tugmasi va /myrank Buyrug'i Handler
+# ---------------------------------------------------------------------------
+
+@Client.on_message(filters.regex(r"^(📊 Darajamni ko'rish|🏆 Darajam)$") | filters.command(["myrank", "mylevel", "myxp"]))
+async def my_rank_handler(client: Client, message: Message):
+    """Foydalanuvchining shaxsiy darajasi va statistikasi"""
+    await _ensure_level_tables()
+    user = message.from_user
+    if not user or user.is_bot:
+        return
+
+    user_id = user.id
+    async with get_db_connection() as db:
+        async with db.execute("""
+            SELECT SUM(xp), MAX(level), SUM(messages_count), COUNT(DISTINCT chat_id)
+            FROM group_user_xp WHERE user_id = ?
+        """, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+
+    total_xp = int(row[0]) if (row and row[0] is not None) else 0
+    max_level = int(row[1]) if (row and row[1] is not None) else 1
+    total_msgs = int(row[2]) if (row and row[2] is not None) else 0
+    groups_count = int(row[3]) if (row and row[3] is not None) else 0
+
+    calc_level = calculate_level(total_xp)
+    effective_level = max(max_level, calc_level)
+
+    title_name, emoji = get_title_info(effective_level)
+    next_title = get_next_title_name(effective_level)
+
+    cur_lvl_xp_start = xp_for_level(effective_level)
+    next_lvl_xp = xp_for_level(effective_level + 1)
+    
+    current_in_lvl = max(0, total_xp - cur_lvl_xp_start)
+    needed_in_lvl = max(1, next_lvl_xp - cur_lvl_xp_start)
+    remaining_to_next = max(0, next_lvl_xp - total_xp)
+
+    progress_bar = make_progress_bar(current_in_lvl, needed_in_lvl, 5)
+    percent = int(min(100, (current_in_lvl / needed_in_lvl) * 100))
+
+    if user.username:
+        u_mention = f"@{user.username}"
+    else:
+        u_mention = f"[{user.first_name or 'Foydalanuvchi'}](tg://user?id={user_id})"
+
+    text = (
+        f"🏆 **SIZNING DARAJANGIZ VA STATISTIKANGIZ**\n\n"
+        f"👤 **Foydalanuvchi:** {u_mention}\n"
+        f"🆔 **ID:** `{user_id}`\n"
+        f"📊 **Daraja:** Level {effective_level} ({emoji} {title_name})\n"
+        f"✨ **Jami XP:** `{total_xp}` / `{next_lvl_xp}` XP\n"
+        f"🎖 **Keyingi unvon:** **{next_title}** ({remaining_to_next} XP qoldi)\n"
+        f"📈 **Progress:** `[{progress_bar}]` **{percent}%** (`{current_in_lvl}`/`{needed_in_lvl}` XP)\n"
+        f"💬 **Jami xabarlar:** `{total_msgs}` ta\n"
+        f"👥 **Faol guruhlar:** `{groups_count}` ta"
+    )
+
+    await message.reply_text(text)

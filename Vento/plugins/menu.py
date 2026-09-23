@@ -51,7 +51,8 @@ async def get_main_keyboard(uid: int) -> ReplyKeyboardMarkup:
         rows = [
             [KeyboardButton("🔍 Scraper"),   KeyboardButton("🗂 Bazalar")],
             [KeyboardButton("📨 Mass DM"),   KeyboardButton("🏷 Utag")],
-            [KeyboardButton("💬 Chatlar"),   KeyboardButton("🔍 Guruh qidirish"), KeyboardButton("🎁 Konkurs")],
+            [KeyboardButton("💬 Chatlar"),   KeyboardButton("🔍 Guruh qidirish")],
+            [KeyboardButton("🎁 Konkurs"),   KeyboardButton("📊 Darajamni ko'rish")],
         ]
         if adm:
             # Check if profile analyzer is available
