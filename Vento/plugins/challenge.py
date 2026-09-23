@@ -21,7 +21,7 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
-from pyrogram.enums import ChatMemberStatus
+from pyrogram.enums import ChatMemberStatus, ParseMode
 
 from database import get_db_connection
 from config import is_owner
@@ -171,13 +171,13 @@ async def increment_challenge_progress(client: Client, chat_id: int, challenge_t
             bar_str, pct = format_progress_bar(new_count, target)
             title = challenge["title"]
             msg = (
-                f"🎉 **MAQSAD BAJARILDI!** 🎯\n\n"
-                f"🏆 **Challenge**: {title}\n"
-                f"📊 **Natija**: {new_count:,} / {target:,} ({pct}%)\n"
-                f"📈 {bar_str}\n\n"
+                f"🎉 <b>MAQSAD BAJARILDI!</b> 🎯\n\n"
+                f"🏆 <b>Challenge</b>: {title}\n"
+                f"📊 <b>Natija</b>: {new_count:,} / {target:,} ({pct}%)\n"
+                f"📈 <code>{bar_str}</code>\n\n"
                 f"✨ Barcha guruh a'zolariga yuqori faolligi uchun rahmat! Yangi maqsad belgilash uchun /setchallenge bosing."
             )
-            await client.send_message(chat_id, msg)
+            await client.send_message(chat_id, msg, parse_mode=ParseMode.HTML)
         except Exception as e:
             logger.warning(f"Challenge completion broadcast error in chat {chat_id}: {e}")
 
@@ -218,16 +218,16 @@ async def view_challenge_command(client: Client, message: Message):
     if not challenge:
         is_admin = await is_group_admin(client, chat_id, user_id)
         text = (
-            "🎯 **Guruh Maqsadi (Challenge)**\n\n"
+            "🎯 <b>Guruh Maqsadi (Challenge)</b>\n\n"
             "Hozirda bu guruhda faol maqsad belgilanmagan.\n"
         )
         buttons = []
         if is_admin:
-            text += "\n👇 Admin sifatiga yangi maqsad yaratishingiz mumkin:"
+            text += "\n👇 Admin sifatida yangi maqsad yaratishingiz mumkin:"
             buttons.append([InlineKeyboardButton("➕ Yangi Maqsad Yaratish", callback_data=f"ch_new_{chat_id}")])
         buttons.append([InlineKeyboardButton("❌ Yopish", callback_data="ch_close")])
         
-        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
         return
 
     title = challenge["title"]
@@ -239,12 +239,12 @@ async def view_challenge_command(client: Client, message: Message):
     rem = max(0, target - curr)
     
     text = (
-        f"🎯 **GURUH MAQSADI (CHALLENGE)**\n\n"
-        f"📌 **Nomi**: {title}\n"
-        f"🏷 **Turi**: {ctype}\n"
-        f"📊 **Progress**: {curr:,} / {target:,} ({pct}%)\n"
-        f"📈 {bar_str}\n"
-        f"⏳ **Qolgani**: {rem:,}\n\n"
+        f"🎯 <b>GURUH MAQSADI (CHALLENGE)</b>\n\n"
+        f"📌 <b>Nomi</b>: {title}\n"
+        f"🏷 <b>Turi</b>: {ctype}\n"
+        f"📊 <b>Progress</b>: {curr:,} / {target:,} ({pct}%)\n"
+        f"📈 <code>{bar_str}</code>\n"
+        f"⏳ <b>Qolgani</b>: {rem:,}\n\n"
         f"💪 Barchamiz birga faol bo'lib ko'zlangan maqsadga erishamiz!"
     )
     
@@ -255,7 +255,7 @@ async def view_challenge_command(client: Client, message: Message):
     buttons.append([InlineKeyboardButton("🔄 Yangilash", callback_data=f"ch_refresh_{chat_id}")])
     buttons.append([InlineKeyboardButton("❌ Yopish", callback_data="ch_close")])
     
-    await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
 
 
 @Client.on_message(filters.command(["setchallenge"]) & filters.group)
@@ -273,7 +273,7 @@ async def set_challenge_command(client: Client, message: Message):
     if len(args) >= 3:
         ctype = args[1].lower()
         if ctype not in ("messages", "members", "xabar", "azolar"):
-            await message.reply_text("❌ Maqsad turi noto'g'ri! `messages` yoki `members` deb kiriting.")
+            await message.reply_text("❌ Maqsad turi noto'g'ri! <code>messages</code> yoki <code>members</code> deb kiriting.", parse_mode=ParseMode.HTML)
             return
         
         c_type_code = "messages" if ctype in ("messages", "xabar") else "members"
@@ -282,7 +282,7 @@ async def set_challenge_command(client: Client, message: Message):
             if target <= 0:
                 raise ValueError
         except ValueError:
-            await message.reply_text("❌ Maqsad miqdori musbat son bo'lishi kerak! Masalan: `/setchallenge messages 10000`")
+            await message.reply_text("❌ Maqsad miqdori musbat son bo'lishi kerak! Masalan: <code>/setchallenge messages 10000</code>", parse_mode=ParseMode.HTML)
             return
             
         unit_str = "xabar" if c_type_code == "messages" else "a'zo"
@@ -303,10 +303,11 @@ async def set_challenge_command(client: Client, message: Message):
             )
             
         await message.reply_text(
-            f"✅ **Yangi guruh maqsadi o'rnatildi!**\n\n"
-            f"🎯 **Nomi**: {title}\n"
-            f"📊 **Maqsad**: {target:,} ta {unit_str}\n\n"
-            f"Ko'rish uchun /challenge deb yozing."
+            f"✅ <b>Yangi guruh maqsadi o'rnatildi!</b>\n\n"
+            f"🎯 <b>Nomi</b>: {title}\n"
+            f"📊 <b>Maqsad</b>: {target:,} ta {unit_str}\n\n"
+            f"Ko'rish uchun /challenge deb yozing.",
+            parse_mode=ParseMode.HTML
         )
         return
 
@@ -324,12 +325,11 @@ async def set_challenge_command(client: Client, message: Message):
     ]
     
     text = (
-        "🎯 **Yangi Guruh Maqsadi O'rnatish**\n\n"
-        "Tayyor shablonlardan birini tanlang yoki komanda orqali kiriting:\n"
-        "`/setchallenge <messages|members> <soni> <nomi>`\n\n"
-        "Masalan: `/setchallenge messages 10000 Haftalik 10k xabar`"
+        "🎯 <b>Yangi Guruh Maqsadi O'rnatish</b>\n\n"
+        "Tayyor shablonlardan birini tanlang yoki komanda yuboring:\n"
+        "<code>/setchallenge messages 10000 Haftalik 10k xabar</code>"
     )
-    await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
 
 
 # ---------------------------------------------------------------------------
@@ -368,11 +368,14 @@ async def challenge_callback_handler(client: Client, cq: CallbackQuery):
             [InlineKeyboardButton("❌ Bekor Qilish", callback_data="ch_close")],
         ]
         text = (
-            "🎯 **Yangi Guruh Maqsadi O'rnatish**\n\n"
+            "🎯 <b>Yangi Guruh Maqsadi O'rnatish</b>\n\n"
             "Tayyor shablonlardan birini tanlang yoki komanda yuboring:\n"
-            "`/setchallenge <messages|members> <soni> <nomi>`"
+            "<code>/setchallenge messages 10000 Haftalik faollik</code>"
         )
-        await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        try:
+            await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.warning(f"edit_text error in ch_new_: {e}")
         return
 
     # Quick preset challenge setup
@@ -408,18 +411,21 @@ async def challenge_callback_handler(client: Client, cq: CallbackQuery):
             bar_str, pct = format_progress_bar(0, target_val)
             ctype_label = "💬 Xabarlar" if ctype == "messages" else "👥 Yangi a'zolar"
             text = (
-                f"✅ **Yangi guruh maqsadi o'rnatildi!**\n\n"
-                f"📌 **Nomi**: {title}\n"
-                f"🏷 **Turi**: {ctype_label}\n"
-                f"📊 **Progress**: 0 / {target_val:,} (0%)\n"
-                f"📈 {bar_str}\n\n"
+                f"✅ <b>Yangi guruh maqsadi o'rnatildi!</b>\n\n"
+                f"📌 <b>Nomi</b>: {title}\n"
+                f"🏷 <b>Turi</b>: {ctype_label}\n"
+                f"📊 <b>Progress</b>: 0 / {target_val:,} (0%)\n"
+                f"📈 <code>{bar_str}</code>\n\n"
                 f"Barchamiz faol bo'lib marraga erishamiz! 💪"
             )
             buttons = [
                 [InlineKeyboardButton("🔄 Yangilash", callback_data=f"ch_refresh_{cid}")],
                 [InlineKeyboardButton("❌ Yopish", callback_data="ch_close")]
             ]
-            await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+            try:
+                await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
+            except Exception as e:
+                logger.warning(f"edit_text error in ch_preset_: {e}")
             return
 
     # Refresh current challenge status
@@ -438,12 +444,12 @@ async def challenge_callback_handler(client: Client, cq: CallbackQuery):
         rem = max(0, target - curr)
         
         text = (
-            f"🎯 **GURUH MAQSADI (CHALLENGE)**\n\n"
-            f"📌 **Nomi**: {title}\n"
-            f"🏷 **Turi**: {ctype}\n"
-            f"📊 **Progress**: {curr:,} / {target:,} ({pct}%)\n"
-            f"📈 {bar_str}\n"
-            f"⏳ **Qolgani**: {rem:,}\n\n"
+            f"🎯 <b>GURUH MAQSADI (CHALLENGE)</b>\n\n"
+            f"📌 <b>Nomi</b>: {title}\n"
+            f"🏷 <b>Turi</b>: {ctype}\n"
+            f"📊 <b>Progress</b>: {curr:,} / {target:,} ({pct}%)\n"
+            f"📈 <code>{bar_str}</code>\n"
+            f"⏳ <b>Qolgani</b>: {rem:,}\n\n"
             f"💪 Barchamiz birga faol bo'lib ko'zlangan maqsadga erishamiz!"
         )
         
@@ -454,7 +460,7 @@ async def challenge_callback_handler(client: Client, cq: CallbackQuery):
         buttons.append([InlineKeyboardButton("❌ Yopish", callback_data="ch_close")])
         
         try:
-            await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+            await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
             await cq.answer("🔄 Yangilandi")
         except Exception:
             await cq.answer("O'zgarish yo'q")
@@ -473,5 +479,9 @@ async def challenge_callback_handler(client: Client, cq: CallbackQuery):
                 (chid,)
             )
         await cq.answer("🗑 Maqsad to'xtatildi!", show_alert=True)
-        await cq.message.edit_text("🗑 **Guruh maqsadi to'xtatildi.** Yangi maqsad uchun /setchallenge kiriting.")
+        try:
+            await cq.message.edit_text("🗑 <b>Guruh maqsadi to'xtatildi.</b> Yangi maqsad uchun /setchallenge kiriting.", parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
         return
+
