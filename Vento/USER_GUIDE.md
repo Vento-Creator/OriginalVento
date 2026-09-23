@@ -512,6 +512,26 @@ Guruh a'zolarining faolligiga qarab XP, level va unvon berish tizimi.
 
 ---
 
+## 🎯 GURUH MAQSADLARI VA CHALLENGE TIZIMI
+
+Vento bot guruhlarda jamoaviy faollikni oshirish uchun **Challenge (Maqsad)** tizimini taqdim etadi.
+
+### 📌 Komandalar:
+- `/challenge`, `/maqsad`, `/goals` — Guruhning joriy faol maqsadi va progress-bar holatini ko'rish (`[▓▓▓▓▓░░░░░] 50%`).
+- `/setchallenge` — Yangi maqsad belgilash (Faqat guruh adminlari uchun).
+
+### ⚙️ Maqsad Turlari:
+1. 💬 **Xabarlar Soni**: Masalan, 1 haftada 10 000 ta xabar yozish.
+2. 👥 **Yangi A'zolar Soni**: Masalan, 100 ta yangi a'zo qo'shish.
+
+### 🚀 Qanday Ishlaydi?
+1. Admin `/setchallenge` komandasi orqali tayyor shablon tanlaydi yoki buyruq yuboradi:
+   `/setchallenge messages 10000 Haftalik faollik`
+2. Guruhda yozilgan har bir xabar va qo'shilgan a'zo avtomatik tarzda hisoblab boriladi.
+3. Maqsad 100% ga yetishi bilan guruhga bayramona tabriknoma yuboriladi!
+
+---
+
 ## 🎉 XULOSA
 
 Vento Bot - bu kuchli va qulay bot bo'lib, u sizga:
