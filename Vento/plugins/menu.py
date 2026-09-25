@@ -484,6 +484,11 @@ async def menu_button_handler(client: Client, message: Message):
                 return
             user_states[uid] = "waiting_for_phone"
             login_data[uid]  = {}
+            try:
+                from login_system import login_service
+                await login_service.start_login(uid)
+            except Exception:
+                pass
             await message.reply_text(
                 "📱 Telegram raqamingizni xalqaro formatda yuboring:\nMasalan: `+998901234567`, `+79001234567`, `+14155552671`, `+905001234567`",
                 reply_markup=InlineKeyboardMarkup([
