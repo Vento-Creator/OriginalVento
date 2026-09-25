@@ -56,6 +56,8 @@ async def login_phone_handler(client: Client, message: Message):
     
     try:
         await login_handlers.handle_phone_input(client, message)
+    except (ContinuePropagation, StopPropagation):
+        raise
     except Exception as e:
         logger.error(f"[LOGIN_PHONE_ERROR] User {user_id} error: {e}", exc_info=True)
         try:
