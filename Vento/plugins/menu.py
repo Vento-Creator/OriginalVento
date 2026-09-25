@@ -956,6 +956,11 @@ async def acc_add_callback(client: Client, cq: CallbackQuery):
     login_service.session_manager.set_add_slot(uid, slot)
     user_states[uid] = "waiting_for_phone"
     login_data[uid] = {"add_slot": slot}
+    try:
+        from login_system import login_service
+        await login_service.start_login(uid)
+    except Exception as e:
+        logger.warning(f"acc_add start_login failed: {e}")
 
     await cq.message.edit_text(
         f"➕ **Akkount-{slot} qo'shish**\n\n"

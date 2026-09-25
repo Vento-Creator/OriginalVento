@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 @Client.on_message(filters.private & (filters.text | filters.contact), group=-5)
-@handle_errors("login", "user_id", auto_retry=False)
 async def login_phone_handler(client: Client, message: Message):
     """Handle phone number input"""
     user_id = message.from_user.id
@@ -31,10 +30,19 @@ async def login_phone_handler(client: Client, message: Message):
     session = await login_service.state_manager.get_session(user_id)
     new_state = session.state if session else None
     
+    logger.info(f"[LOGIN_PHONE_TRACE] User {user_id} input received, old_state={old_state}, new_state={new_state}")
+    
     if old_state != "waiting_for_phone" and new_state != LoginState.WAITING_PHONE:
         raise ContinuePropagation
     
-    await login_handlers.handle_phone_input(client, message)
+    try:
+        await login_handlers.handle_phone_input(client, message)
+    except Exception as e:
+        logger.error(f"[LOGIN_PHONE_ERROR] User {user_id} error: {e}", exc_info=True)
+        try:
+            await message.reply_text(f"❌ Xatolik yuz berdi: {e}\n\nIltimos, qaytadan `/start` bosing.")
+        except Exception:
+            pass
 
 
 @Client.on_message(filters.private & filters.text, group=-5)
