@@ -102,6 +102,8 @@ async def register_bot_commands():
     default_commands = [
         BotCommand("start", "Botni ishga tushirish / menyuni ochish"),
         BotCommand("giveaway", "Konkurs yaratish va boshqarish"),
+        BotCommand("stats", "Guruh statistikasi va Top-20 faollar"),
+        BotCommand("statssettings", "Guruh aktivligi va reyting sozlamalari (Adminlar)"),
         BotCommand("rank", "Foydalanuvchi darajasi va XP statistikasi"),
         BotCommand("top", "Guruhning Top-10 faol a'zolari reytingi"),
         BotCommand("challenge", "Guruh maqsadi va faoliyat rejasi"),

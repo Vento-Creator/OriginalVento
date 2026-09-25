@@ -462,10 +462,12 @@ Botdan cheksiz foydalanish uchun obuna sotib olish.
 Guruh a'zolarining faolligiga qarab XP, level va unvon berish tizimi.
 
 ### A'zolar uchun buyruqlar:
+- `/stats` (yoki `/gstats`, `/top20`) — Guruh statistikasi (jami xabarlar, faol a'zolar) va Top-20 faol a'zolar reytingini ko'rsatish (Inline-tugmalar bilan: Bugun / Shu hafta / Barchasi).
 - `/rank` (yoki `/level`, `/xp`) — O'zingizning yoki reply qilingan foydalanuvchining darajasi, XP, progress bari va reytingdagi o'rnini ko'rsatadi.
 - `/top` (yoki `/leaderboard`, `/top_xp`) — Guruhdagi Top-10 faol a'zolar ro'yxati.
 
 ### Adminlar va Bot Adminlari uchun buyruqlar:
+- `/statssettings` (yoki `/statset`) — Guruh aktivligi va reyting sozlamalari menyusi (botlarni ignor qilish, adminlarni ignor qilish, reyting hajmi (Top-10..50), min. xabar uzunligi, reytingni tozalash).
 - `/xpsettings` — Guruh XP va Level sozlamalari menyusi (XP tizimini yoqish/o'chirish, Level Up xabarlarini boshqarish, xabar uchun XP miqdori va cooldown vaqtini tanlash, reytingni tozalash).
 - `/checkxp` — (Faqat "🏆 XP nazorati huquqi" bor Bot adminlari uchun) Reply qilingan a'zoning XP va darajasini tekshirish hamda interaktiv tugmalar orqali boshqarish paneli (`➕ Daraja qo'shish`, `➖ Daraja olib tashlash`, `🌌 Maksimal unvon`, `💥 Bankrot qilish`). *Huquq bo'lmasa bot javob bermaydi.*
 - `/addxp [miqdor]` — Reply qilingan foydalanuvchiga XP qo'shish (Masalan: `/addxp 500`).
