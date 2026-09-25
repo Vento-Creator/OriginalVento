@@ -2,7 +2,7 @@
 Login System Integration - Plugin Handlers for Pyrogram Plugin Loader
 """
 import logging
-from pyrogram import Client, filters, ContinuePropagation
+from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, CallbackQuery
 from config import user_states, is_admin
 from error_handler import handle_errors
