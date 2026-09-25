@@ -21,18 +21,37 @@ logger = logging.getLogger(__name__)
 # Message & Callback Handlers for Pyrogram Plugin System
 # ---------------------------------------------------------------------------
 
-@Client.on_message(filters.private & (filters.text | filters.contact), group=-5)
+@Client.on_message(filters.private & (filters.text | filters.contact), group=-12)
 async def login_phone_handler(client: Client, message: Message):
     """Handle phone number input"""
     user_id = message.from_user.id
     
     old_state = user_states.get(user_id)
+    old_state_str = old_state.value if hasattr(old_state, "value") else str(old_state or "")
+    
     session = await login_service.state_manager.get_session(user_id)
     new_state = session.state if session else None
+    new_state_str = new_state.value if hasattr(new_state, "value") else str(new_state or "")
     
-    logger.info(f"[LOGIN_PHONE_TRACE] User {user_id} input received, old_state={old_state}, new_state={new_state}")
+    logger.info(f"[LOGIN_PHONE_TRACE] User {user_id} input received, old_state={old_state_str}, new_state={new_state_str}")
     
-    if old_state != "waiting_for_phone" and new_state != LoginState.WAITING_PHONE:
+    is_phone_state = (old_state_str == "waiting_for_phone" or new_state_str == "waiting_for_phone")
+    is_own_contact = message.contact is not None and message.contact.user_id == user_id
+    
+    # If user sent a contact card or phone-like text while state wasn't explicitly set, auto-start login
+    if not is_phone_state and not is_own_contact:
+        txt = (message.text or "").strip()
+        digits = "".join(c for c in txt if c.isdigit())
+        if not old_state_str and (txt.startswith("+") or (len(digits) in (9, 12) and digits.startswith("9"))):
+            logger.info(f"[LOGIN_PHONE_TRACE] User {user_id} sent phone number without active state. Auto-starting login.")
+            try:
+                user_states[user_id] = "waiting_for_phone"
+                await login_service.start_login(user_id)
+                is_phone_state = True
+            except Exception as e:
+                logger.error(f"Failed to auto-start login for {user_id}: {e}")
+    
+    if not is_phone_state and not is_own_contact:
         raise ContinuePropagation
     
     try:
@@ -45,33 +64,39 @@ async def login_phone_handler(client: Client, message: Message):
             pass
 
 
-@Client.on_message(filters.private & filters.text, group=-5)
+@Client.on_message(filters.private & filters.text, group=-12)
 @handle_errors("login", "user_id", auto_retry=False)
 async def login_code_handler(client: Client, message: Message):
     """Handle verification code input"""
     user_id = message.from_user.id
     
     old_state = user_states.get(user_id)
+    old_state_str = old_state.value if hasattr(old_state, "value") else str(old_state or "")
+    
     session = await login_service.state_manager.get_session(user_id)
     new_state = session.state if session else None
+    new_state_str = new_state.value if hasattr(new_state, "value") else str(new_state or "")
     
-    if old_state != "waiting_for_code" and new_state != LoginState.WAITING_CODE:
+    if old_state_str != "waiting_for_code" and new_state_str != "waiting_for_code":
         raise ContinuePropagation
     
     await login_handlers.handle_code_input(client, message)
 
 
-@Client.on_message(filters.private & filters.text, group=-5)
+@Client.on_message(filters.private & filters.text, group=-12)
 @handle_errors("login", "user_id", auto_retry=False)
 async def login_password_handler(client: Client, message: Message):
     """Handle 2FA password input"""
     user_id = message.from_user.id
     
     old_state = user_states.get(user_id)
+    old_state_str = old_state.value if hasattr(old_state, "value") else str(old_state or "")
+    
     session = await login_service.state_manager.get_session(user_id)
     new_state = session.state if session else None
+    new_state_str = new_state.value if hasattr(new_state, "value") else str(new_state or "")
     
-    if old_state != "waiting_for_password" and new_state != LoginState.WAITING_PASSWORD:
+    if old_state_str != "waiting_for_password" and new_state_str != "waiting_for_password":
         raise ContinuePropagation
     
     await login_handlers.handle_password_input(client, message)

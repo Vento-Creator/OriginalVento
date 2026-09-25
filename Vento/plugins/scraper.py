@@ -1030,9 +1030,12 @@ async def add_contact_to_baza_handler(client: Client, message: Message):
     from config import user_states
     from login_system import LoginState
     user_id = message.from_user.id
+    contact = message.contact
     
-    # If user is logging in, do NOT intercept contact
-    if user_states.get(user_id) in ("waiting_for_phone", "waiting_for_code", "waiting_for_password"):
+    # If user sends their OWN contact or is in any login state, do NOT intercept contact!
+    st = user_states.get(user_id)
+    st_val = st.value if hasattr(st, "value") else str(st or "")
+    if (contact and contact.user_id == user_id) or st_val in ("waiting_for_phone", "waiting_for_code", "waiting_for_password", "waiting_for_admin_approval"):
         raise ContinuePropagation
         
     from feature_flags import gate_feature
