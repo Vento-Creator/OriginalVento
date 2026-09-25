@@ -957,7 +957,6 @@ async def acc_add_callback(client: Client, cq: CallbackQuery):
     user_states[uid] = "waiting_for_phone"
     login_data[uid] = {"add_slot": slot}
     try:
-        from login_system import login_service
         await login_service.start_login(uid)
     except Exception as e:
         logger.warning(f"acc_add start_login failed: {e}")
