@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 _tables_initialized = False
 _db_lock = asyncio.Lock()
 _settings_cache: Dict[int, dict] = {}
+_last_stats_msg: Dict[Tuple[int, int], int] = {}
+_last_settings_msg: Dict[Tuple[int, int], int] = {}
 
 
 async def _ensure_stats_tables():
@@ -343,15 +345,63 @@ def build_settings_keyboard(settings: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-@Client.on_message(filters.command(["statssettings", "statsettings", "statset"]) & filters.group)
+@Client.on_message(filters.command(["stats", "gstats", "top20"]))
+async def group_stats_command(client: Client, message: Message):
+    """Guruh statistikasi va Top-20 faollar buyrug'i"""
+    if not message.chat or message.chat.type.value not in ("group", "supergroup"):
+        await message.reply_text("⚠️ Bu buyruq faqat guruhlarda ishlaydi!")
+        return
+
+    chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user else 0
+
+    # Oldingi panelni o'chirish (Chat tozaligi uchun)
+    prev_msg_id = _last_stats_msg.get((chat_id, user_id))
+    if prev_msg_id:
+        try:
+            await client.delete_messages(chat_id, prev_msg_id)
+        except Exception:
+            pass
+
+    # Foydalanuvchining /stats buyroq xabarini ham o'chirishga harakat qilish
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    text, kb = await build_stats_data(chat_id, mode="week")
+    sent_msg = await client.send_message(chat_id, text, reply_markup=kb, disable_web_page_preview=True)
+    if sent_msg:
+        _last_stats_msg[(chat_id, user_id)] = sent_msg.id
+
+
+@Client.on_message(filters.command(["statssettings", "statsettings", "statset"]))
 async def stats_settings_command(client: Client, message: Message):
     """Guruh aktivlik va reyting sozlamalari (Faqat adminlar)"""
+    if not message.chat or message.chat.type.value not in ("group", "supergroup"):
+        await message.reply_text("⚠️ Bu buyruq faqat guruhlarda ishlaydi!")
+        return
+
     chat_id = message.chat.id
-    user_id = message.from_user.id
+    user_id = message.from_user.id if message.from_user else 0
 
     if not await is_group_admin(client, chat_id, user_id):
         await message.reply_text("❌ Bu buyruq faqat guruh adminlari uchun!")
         return
+
+    # Oldingi sozlamalar panelini o'chirish (Chat tozaligi uchun)
+    prev_msg_id = _last_settings_msg.get((chat_id, user_id))
+    if prev_msg_id:
+        try:
+            await client.delete_messages(chat_id, prev_msg_id)
+        except Exception:
+            pass
+
+    # Foydalanuvchining /statssettings buyroq xabarini o'chirishga harakat qilish
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
     settings = await get_stats_settings(chat_id)
     kb = build_settings_keyboard(settings)
@@ -361,7 +411,9 @@ async def stats_settings_command(client: Client, message: Message):
         "Quyidagi tugmalar orqali aktivlik hisob-kitobini sozlashingiz mumkin:"
     )
 
-    await message.reply_text(text, reply_markup=kb)
+    sent_msg = await client.send_message(chat_id, text, reply_markup=kb)
+    if sent_msg:
+        _last_settings_msg[(chat_id, user_id)] = sent_msg.id
 
 
 @Client.on_callback_query(filters.regex(r"^gstats_"))
@@ -375,6 +427,8 @@ async def group_stats_callback(client: Client, cq: CallbackQuery):
             await cq.message.delete()
         except Exception:
             pass
+        _last_stats_msg.pop((chat_id, cq.from_user.id), None)
+        _last_settings_msg.pop((chat_id, cq.from_user.id), None)
         return
 
     if data == "gstats_open_settings":
