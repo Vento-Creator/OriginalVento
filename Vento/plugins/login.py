@@ -108,28 +108,30 @@ async def login_password_handler(client: Client, message: Message):
 @handle_errors("login", "user_id", auto_retry=False)
 async def cancel_login_callback(client: Client, callback_query: CallbackQuery):
     """Handle login cancellation"""
-    await login_handlers.handle_cancel_callback(client, callback_query)
+    await login_handlers.handle_cancel_login(client, callback_query)
 
 
 @Client.on_callback_query(filters.regex(r"^admin_approve_(\d+)$"))
 @handle_errors("login", "user_id", auto_retry=False)
 async def admin_approve_callback(client: Client, callback_query: CallbackQuery):
     """Handle admin approval"""
-    await login_handlers.handle_admin_approve_callback(client, callback_query)
+    target_id = int(callback_query.data.split("_")[2])
+    await login_handlers.handle_admin_approve(client, callback_query, target_id)
 
 
 @Client.on_callback_query(filters.regex(r"^admin_reject_(\d+)$"))
 @handle_errors("login", "user_id", auto_retry=False)
 async def admin_reject_callback(client: Client, callback_query: CallbackQuery):
     """Handle admin rejection"""
-    await login_handlers.handle_admin_reject_callback(client, callback_query)
+    target_id = int(callback_query.data.split("_")[2])
+    await login_handlers.handle_admin_reject(client, callback_query, target_id)
 
 
 @Client.on_callback_query(filters.regex("^check_login_approval$"))
 @handle_errors("login", "user_id", auto_retry=False)
 async def check_approval_callback(client: Client, callback_query: CallbackQuery):
     """Handle approval check button"""
-    await login_handlers.handle_check_approval_callback(client, callback_query)
+    await login_handlers.handle_check_approval(client, callback_query)
 
 
 @Client.on_callback_query(filters.regex("^logout$"))
