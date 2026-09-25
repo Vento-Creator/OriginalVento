@@ -1024,10 +1024,17 @@ async def add_to_baza_handler(client: Client, message: Message):
         await msg.edit_text("❌ Sessiya xatosi. Iltimos, akkauntingizni qayta ulang.")
 
 
-# Kontakt orqali bazaga foydalanuvchi qo'shish
 @Client.on_message(filters.private & filters.contact, group=-10)
 async def add_contact_to_baza_handler(client: Client, message: Message):
     """Foydalanuvchi kontakt yuborsa, avvalgi bazaga qo'shish imkonini beradi."""
+    from config import user_states
+    from login_system import LoginState
+    user_id = message.from_user.id
+    
+    # If user is logging in, do NOT intercept contact
+    if user_states.get(user_id) in ("waiting_for_phone", "waiting_for_code", "waiting_for_password"):
+        raise ContinuePropagation
+        
     from feature_flags import gate_feature
     if not await gate_feature(message, "scraper"):
         return

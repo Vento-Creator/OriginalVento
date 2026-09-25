@@ -79,13 +79,22 @@ class LoginHandlers:
         from login_system.login_core import PhoneValidator
         
         user_id = message.from_user.id
-        phone = message.text.strip()
+        
+        if message.contact:
+            phone = message.contact.phone_number or ""
+        elif message.text:
+            phone = message.text.strip()
+        else:
+            raise ContinuePropagation
+
+        if not phone:
+            raise ContinuePropagation
         
         try:
-            # STRICT VALIDATION: Only process if message contains + OR has 9+ digits
+            # STRICT VALIDATION: Only process if message comes from contact, contains +, OR has 9+ digits
             # This prevents 4-6 digit SMS codes from being processed as phone numbers
             digits_only = phone.replace("+", "").replace(" ", "").replace("-", "")
-            if not ("+" in phone or len(digits_only) >= 9):
+            if not (message.contact or "+" in phone or len(digits_only) >= 9):
                 # Not a phone number - let other handlers process it
                 raise ContinuePropagation
             
@@ -868,7 +877,7 @@ login_handlers = LoginHandlers(login_service)
 
 
 # Register handlers
-@Client.on_message(filters.private & filters.text, group=-5)  # High priority to catch before other plugins
+@Client.on_message(filters.private & (filters.text | filters.contact), group=-5)  # High priority to catch before other plugins
 @handle_errors("login", "user_id", auto_retry=False)
 async def login_phone_handler(client: Client, message: Message):
     """Handle phone number input"""
