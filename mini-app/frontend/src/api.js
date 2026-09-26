@@ -42,13 +42,25 @@ export const commandsApi = {
 }
 
 export const adminApi = {
-  getUsers: (page = 1, limit = 20) => api.get(`/admin/users?page=${page}&limit=${limit}`),
+  getUsers: (page = 1, limit = 20, search = '') =>
+    api.get(`/admin/users?page=${page}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ''}`),
   getStats: () => api.get('/admin/stats'),
   getPending: () => api.get('/admin/pending'),
+  getUserDetail: (id) => api.get(`/admin/user/${id}`),
+  extendSub: (user_id, days) => api.post('/admin/extend_sub', { user_id, days }),
+  toggleFree: (user_id, is_free) => api.post('/admin/toggle_free', { user_id, is_free }),
+  banUser: (user_id, ban) => api.post('/admin/ban_user', { user_id, ban }),
 }
 
 export const statsApi = {
   get: () => api.get('/stats/'),
+}
+
+export const loginApi = {
+  status:  ()  => api.get('/login/status'),
+  request: ()  => api.post('/login/request'),
+  check:   ()  => api.get('/login/check'),
+  logout:  ()  => api.delete('/login/session'),
 }
 
 export default api

@@ -50,7 +50,7 @@ SECOND_ADMIN_ID = _int_env("SECOND_ADMIN_ID", required=False, default=0)
 ADMIN_REPORT_CHAT_ID = _int_env("ADMIN_REPORT_CHAT_ID", required=False, default=0)
 OWNER_ID = SUPER_ADMIN_ID
 ADMIN_IDS = [SUPER_ADMIN_ID] + ([SECOND_ADMIN_ID] if SECOND_ADMIN_ID else [])
-MINI_APP_URL = os.getenv("MINI_APP_URL", "https://vento-webapp.netlify.app")
+MINI_APP_URL = os.getenv("MINI_APP_URL", "https://ventowebapp.netlify.app")
 
 # Backward-compatible config object. It intentionally contains no secrets written to disk.
 config = {

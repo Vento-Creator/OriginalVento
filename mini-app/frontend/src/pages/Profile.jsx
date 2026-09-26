@@ -1,11 +1,40 @@
+import { useState, useEffect } from 'react'
 import { useRemaining } from '../utils/subscription'
+import { loginApi } from '../api'
 
-export default function Profile({ user }) {
+export default function Profile({ user, onStartLogin }) {
   const tg = window.Telegram?.WebApp
   const remaining = useRemaining(user?.subscription_expiry, user?.is_free)
+  const [sessionStatus, setSessionStatus] = useState(null)
+  const [loadingSession, setLoadingSession] = useState(true)
 
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
   const username = user?.username ? `@${user.username}` : '—'
+
+  useEffect(() => {
+    loginApi.status()
+      .then(r => setSessionStatus(r.data))
+      .catch(() => setSessionStatus(null))
+      .finally(() => setLoadingSession(false))
+  }, [])
+
+  const handleLogout = () => {
+    if (tg) {
+      tg.showConfirm(
+        '🔓 Sessiyani uzmoqchimisiz?\n\nUzilgandan so\'ng bot funksiyalari ishlashni to\'xtatadi.',
+        async (confirmed) => {
+          if (confirmed) {
+            await loginApi.logout().catch(() => {})
+            setSessionStatus({ has_session: false, step: 'idle' })
+          }
+        }
+      )
+    } else {
+      loginApi.logout().then(() => {
+        setSessionStatus({ has_session: false, step: 'idle' })
+      })
+    }
+  }
 
   return (
     <div className="page">
@@ -21,11 +50,14 @@ export default function Profile({ user }) {
         }
         <h2 style={{ fontSize: 20, fontWeight: 700 }}>{name || 'Foydalanuvchi'}</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 4 }}>{username}</p>
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
           {remaining.active
             ? <span className="badge badge-success">✅ Obuna faol</span>
             : <span className="badge badge-danger">❌ Obuna yo'q</span>
           }
+          {user?.is_admin && (
+            <span className="badge badge-purple">🛠 Admin</span>
+          )}
         </div>
         {remaining.active && !remaining.free && (
           <p className="countdown" style={{ marginTop: 10, fontSize: 18 }}>{remaining.label}</p>
@@ -85,11 +117,65 @@ export default function Profile({ user }) {
         )}
       </div>
 
+      {/* Sessiya holati */}
+      <p className="section-title">Telegram Sessiya</p>
+      <div className="card" style={{ marginBottom: 16 }}>
+        {loadingSession ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Tekshirilmoqda...</span>
+          </div>
+        ) : sessionStatus?.has_session ? (
+          <div>
+            <div className="list-item" style={{ paddingTop: 0 }}>
+              <div className="item-left">
+                <div className="item-icon">🔗</div>
+                <div>
+                  <div className="item-title">Sessiya ulangan</div>
+                  <div className="item-sub">Bot funksiyalari faol ishlayapti</div>
+                </div>
+              </div>
+              <span className="badge badge-success">Faol</span>
+            </div>
+            <button
+              className="btn btn-danger"
+              onClick={handleLogout}
+              id="profile-logout-btn"
+              style={{ marginTop: 12 }}
+            >
+              🔓 Sessiyani Uzish
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div className="list-item" style={{ paddingTop: 0 }}>
+              <div className="item-left">
+                <div className="item-icon">⚠️</div>
+                <div>
+                  <div className="item-title">Sessiya yo'q</div>
+                  <div className="item-sub">Bot funksiyalari ishlamasligi mumkin</div>
+                </div>
+              </div>
+              <span className="badge badge-warning">Ulanmagan</span>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={onStartLogin}
+              id="profile-connect-btn"
+              style={{ marginTop: 12 }}
+            >
+              🔗 Sessiya Ulash
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Close button */}
       <button
         className="btn btn-ghost"
         onClick={() => tg?.close()}
-        style={{ marginTop: 8 }}
+        style={{ marginTop: 4 }}
+        id="profile-close-btn"
       >
         ✕ Yopish
       </button>

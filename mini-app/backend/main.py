@@ -32,13 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import users, subscription, commands, admin, stats
+from routers import users, subscription, commands, admin, stats, login
 
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(subscription.router, prefix="/api/subscription", tags=["Subscription"])
 app.include_router(commands.router, prefix="/api/commands", tags=["Commands"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(stats.router, prefix="/api/stats", tags=["Stats"])
+app.include_router(login.router, prefix="/api/login", tags=["Login"])
 
 
 @app.get("/")
