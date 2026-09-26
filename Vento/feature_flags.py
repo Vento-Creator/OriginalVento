@@ -283,8 +283,9 @@ async def is_referral_enabled() -> bool:
 # ------------------------- Boshqaruv ruxsatnomasi -------------------------
 
 def is_owner(user_id: int) -> bool:
-    """Owner (SUPER_ADMIN_ID) — hamma narsani boshqara oladi, o'z flaglaridan tashqari."""
-    return user_id == SUPER_ADMIN_ID
+    """Owner — hamma narsani boshqara oladi, o'z flaglaridan tashqari."""
+    from config import is_owner as config_is_owner
+    return config_is_owner(user_id)
 
 
 def _manager_key(user_id: int) -> str:

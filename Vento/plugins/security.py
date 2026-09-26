@@ -133,8 +133,8 @@ async def banned_user_middleware(client: Client, message: Message):
         security_logger.debug("[DIAG] MESSAGE_BLOCKED: no from_user")
         raise ContinuePropagation
 
-    if config.is_admin(message.from_user.id):
-        security_logger.debug("[DIAG] MESSAGE_BYPASS: admin user_id=%d", message.from_user.id)
+    if config.is_admin(message.from_user.id) or config.is_owner(message.from_user.id):
+        security_logger.debug("[DIAG] MESSAGE_BYPASS: admin/owner user_id=%d", message.from_user.id)
         raise ContinuePropagation
 
     count = await get_violation_count(message.from_user.id)
@@ -159,8 +159,8 @@ async def banned_callback_middleware(client: Client, callback_query: CallbackQue
         security_logger.debug("[DIAG] CALLBACK_BLOCKED: no from_user")
         raise ContinuePropagation
 
-    if config.is_admin(callback_query.from_user.id):
-        security_logger.debug("[DIAG] CALLBACK_BYPASS: admin user_id=%d", callback_query.from_user.id)
+    if config.is_admin(callback_query.from_user.id) or config.is_owner(callback_query.from_user.id):
+        security_logger.debug("[DIAG] CALLBACK_BYPASS: admin/owner user_id=%d", callback_query.from_user.id)
         raise ContinuePropagation
 
     if callback_query.data == "show_laws":
