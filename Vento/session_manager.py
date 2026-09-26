@@ -225,11 +225,45 @@ def clear_add_slot(user_id: int):
     _add_slot_targets.pop(user_id, None)
 
 
+def evict_cached_client(user_id: int, slot: int = 0):
+    """Evict a cached client from memory so future get_user_client calls build a fresh client."""
+    key = (user_id, slot)
+    client = _user_clients.pop(key, None)
+    _client_last_used.pop(key, None)
+    if client and getattr(client, "is_connected", False):
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    loop.create_task(client.disconnect())
+            except RuntimeError:
+                pass
+        except Exception:
+            pass
+
+
+async def invalidate_user_client(user_id: int, slot: int = None):
+    """Safely disconnect and evict cached Pyrogram client(s) for a user when session is invalid/unregistered."""
+    if slot is None:
+        slot = get_active_slot(user_id)
+    key = (user_id, slot)
+    user_lock = get_user_lock(user_id, slot)
+    async with user_lock:
+        client = _user_clients.pop(key, None)
+        _client_last_used.pop(key, None)
+        if client and getattr(client, "is_connected", False):
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=5.0)
+            except Exception:
+                pass
+
+
 def move_session_to_final(user_id: int, slot: int = 0) -> bool:
     """Pending sessiyani (asosiy yoki slot) final joyiga ko'chiradi.
     
     slot=0 → user_{id}.session (asosiy), slot>0 → user_{id}_acc_{slot}.session.
     """
+    evict_cached_client(user_id, slot)
     try:
         import shutil
         src = os.path.join(SESSIONS_DIR, "pending", f"user_{user_id}.session")
@@ -477,6 +511,9 @@ def archive_user_session(user_id: int) -> bool:
     client. Returns True if at least one file was archived, False when there
     was no active session file to archive.
     """
+    evict_cached_client(user_id, 0)
+    for acc in get_accounts(user_id):
+        evict_cached_client(user_id, acc.get("slot", 0))
     src_base = os.path.join(SESSIONS_DIR, f"user_{user_id}")
     if not os.path.exists(src_base + ".session"):
         return False

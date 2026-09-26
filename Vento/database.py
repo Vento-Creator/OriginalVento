@@ -1418,15 +1418,22 @@ async def get_user_recent_actions(user_id: int, limit: int = 10):
             return [{"action": r[0], "timestamp": r[1]} for r in rows]
 
 
+_admin_cols_ensured = False
+
+
 async def _ensure_admin_permission_columns():
     """Ensure admins table contains new permission columns"""
+    global _admin_cols_ensured
+    if _admin_cols_ensured:
+        return
     async with get_db_connection() as db:
         for col in ("can_manage_scraper", "can_use_owner_ux", "can_manage_xp"):
             try:
-                await db.execute(f"ALTER TABLE admins ADD COLUMN {col} INTEGER DEFAULT 1")
+                await db.execute(f"ALTER TABLE admins ADD COLUMN IF NOT EXISTS {col} INTEGER DEFAULT 1")
                 await db.commit()
             except Exception:
                 pass
+    _admin_cols_ensured = True
 
 
 async def add_admin(admin_id: int, joined_date: int, admin_date: int):

@@ -10,7 +10,7 @@ from pyrogram import Client, filters, ContinuePropagation
 
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 
-from pyrogram.errors import FloodWait, ChatWriteForbidden, UserBannedInChannel, PeerIdInvalid
+from pyrogram.errors import FloodWait, ChatWriteForbidden, UserBannedInChannel, PeerIdInvalid, AuthKeyUnregistered, AuthKeyDuplicated, SessionExpired, SessionRevoked
 
 from pyrogram.enums import ParseMode, MessageEntityType
 
@@ -26,7 +26,7 @@ import re
 
 from config import user_states, stop_flags, pause_flags, SESSIONS_DIR, user_settings, user_custom_commands, is_owner, can_use_owner_ux
 
-from session_manager import get_user_client
+from session_manager import get_user_client, invalidate_user_client
 
 from database import get_user_utag_commands, save_user_utag_command, add_utag_timer, get_utag_timer, get_user_utag_timers, update_utag_timer_last_sent, set_utag_timer_active, delete_utag_timer, get_all_active_utag_timers
 
@@ -868,12 +868,25 @@ async def custom_utag_command_handler(client: Client, message: Message):
         logger.exception(f"[UTAG_ROOT_CAUSE] Full traceback:")
         raise  # Re-raise to see the actual exception
     except Exception as e:
-        # Log the FULL traceback to see the actual root cause
+        error_str = str(e).upper()
+        if "AUTH_KEY_UNREGISTERED" in error_str or "AUTH_KEY_INVALID" in error_str or "401" in error_str or "SESSION_EXPIRED" in error_str or "SESSION_REVOKED" in error_str or isinstance(e, (AuthKeyUnregistered, AuthKeyDuplicated, SessionExpired, SessionRevoked)):
+            logger.warning(f"[UTAG] AuthKeyUnregistered / session expired for user {eff_id} in chat {chat_id}: {e}")
+            await invalidate_user_client(eff_id)
+            if not owner_override:
+                await message.reply_text(
+                    "❌ **Sizning Telegram akkauntingiz sessiyasi bekor qilingan! (AUTH_KEY_UNREGISTERED)**\n\n"
+                    "Telegram akkauntingiz sessiyasi eskirgan yoki Telegram ilovasidan chiqarib yuborilgan.\n\n"
+                    "🔧 **Yechim:**\n"
+                    "1. Botga qayta kirish uchun **/start** tugmasini bosing\n"
+                    "2. Akkauntingizni botga qayta ulang (Login qiling)."
+                )
+            raise ContinuePropagation
+
+        # Log the FULL traceback to see the actual root cause for other exceptions
         logger.error(f"[UTAG_ROOT_CAUSE] Exception in get_chat_members | chat_id={chat_id}")
         logger.exception(f"[UTAG_ROOT_CAUSE] Full traceback:")
         
         # Check for specific Telegram errors
-        error_str = str(e).upper()
         if "CHANNEL_INVALID" in error_str or "CHANNEL_PRIVATE" in error_str:
             logger.info(f"[UTAG_DEBUG] User not member of group or group not found | chat_id={chat_id}")
             if owner_override:

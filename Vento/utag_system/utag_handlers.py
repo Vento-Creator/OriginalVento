@@ -304,6 +304,12 @@ class UtagHandlers:
                     members.append(u.username)
         except Exception as e:
             logger.error(f"[UTAG] Failed to fetch members for chat {chat_id} using user {user_id}: {e}")
+            err_str = str(e).upper()
+            if "AUTH_KEY_UNREGISTERED" in err_str or "AUTH_KEY_INVALID" in err_str or "401" in err_str or "SESSION_EXPIRED" in err_str or "SESSION_REVOKED" in err_str:
+                from session_manager import invalidate_user_client
+                await invalidate_user_client(user_id)
+                await message.reply_text("❌ **Sizning Telegram akkauntingiz sessiyasi bekor qilingan! (AUTH_KEY_UNREGISTERED)**\n\nBotga qayta kirish uchun **/start** tugmasini bosing.")
+                return
             await message.reply_text("❌ Guruh a'zolarini o'qib bo'lmadi. Bot guruhda adminligini yoki a'zolar yopiq emasligini tekshiring.")
             return
             

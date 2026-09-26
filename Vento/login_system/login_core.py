@@ -877,7 +877,7 @@ class AuthManager:
                 logger.info(f"Auto-refreshing session for user {user_id} to get full group access...")
                 
                 # Clientni olish va connect qilish
-                from session_manager import get_user_client
+                from session_manager import get_user_client, close_user_client_slot, invalidate_user_client
                 temp_client = await get_user_client(user_id)
                 
                 if temp_client and not temp_client.is_connected:
@@ -893,10 +893,12 @@ class AuthManager:
                     logger.info(f"User {user_id} uchun {dialog_count} ta dialog yuklandi (full access)")
                 except Exception as dialog_error:
                     logger.warning(f"Dialoglarni yuklashda xatolik: {dialog_error}")
+                    err_str = str(dialog_error).upper()
+                    if "AUTH_KEY_UNREGISTERED" in err_str or "AUTH_KEY_INVALID" in err_str or "401" in err_str:
+                        await invalidate_user_client(user_id, _slot)
                 
-                # Clientni disconnect qilish (session fayli saqlanadi)
-                if temp_client.is_connected:
-                    await temp_client.disconnect()
+                # Clientni xotiradan toza yopish va olib tashlash
+                await close_user_client_slot(user_id, _slot)
                 
                 logger.info(f"User {user_id} sessiyasi muvaffaqiyatli refresh qilindi")
                 
